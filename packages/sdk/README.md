@@ -9,6 +9,10 @@ TypeScript client for the [OpenType](https://opentype.dev) API: calibrated decis
 
 ## Install
 
+Not on npm yet. Until the first release, build and pack it from
+[OpentypeAI/opentype-js](https://github.com/OpentypeAI/opentype-js#install) and install the tarball.
+After the release:
+
 ```sh
 npm install @opentype/sdk
 ```

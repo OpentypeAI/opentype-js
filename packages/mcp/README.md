@@ -11,6 +11,8 @@ MCP server for [OpenType](https://opentype.dev). Gives coding agents calibrated 
 | `opentype_get_run` | re-reading a run | free, read-only |
 | `opentype_usage` | checking spend and quota | free, read-only |
 
+Not on npm yet. Until the first release, build [OpentypeAI/opentype-js](https://github.com/OpentypeAI/opentype-js#install) and replace `npx -y @opentype/mcp` below with `node /path/to/opentype-js/packages/mcp/dist/bin.js`.
+
 Create a key at https://console.opentype.dev/keys (scopes `runs_write`, `runs_read`, `usage_read`). The server starts without a key and lists its tools; a tool call then explains how to set `OPENTYPE_API_KEY`. `OPENTYPE_BASE_URL` overrides the API URL.
 
 ### Routing
