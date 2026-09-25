@@ -148,6 +148,16 @@ describe("openai adapter", () => {
     expect(out).toMatchObject({ type: "function_call_output", call_id: "c2" });
   });
 
+  it("answers malformed arguments with an error result instead of throwing", async () => {
+    const t = openaiTools(client());
+    const msg = await t.handle({ id: "c", type: "function", function: { name: "opentype_get_run", arguments: "{oops" } });
+    expect(msg).toMatchObject({ role: "tool", tool_call_id: "c" });
+    expect(msg.content).toContain("invalid_arguments");
+    const out = await t.handleResponse({ type: "function_call", call_id: "c2", name: "opentype_get_run", arguments: "[1]" });
+    expect(out).toMatchObject({ type: "function_call_output", call_id: "c2" });
+    expect(out.output).toContain("invalid_arguments");
+  });
+
   it("does not need a key to list definitions", () => {
     vi.stubEnv("OPENTYPE_API_KEY", "");
     expect(openaiTools().definitions).toHaveLength(6);

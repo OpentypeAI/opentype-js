@@ -14,6 +14,8 @@ export async function* parseSSE(body: ReadableStream<Uint8Array>): AsyncGenerato
   let event = "";
   let data: string[] = [];
   let id: string | undefined;
+  // The previous chunk ended in `\r`, already taken as a line end; a `\n` opening this chunk completes that CRLF.
+  let skipLF = false;
   const flush = (): SSEMessage | undefined => {
     if (data.length === 0 && !event) return undefined;
     const msg: SSEMessage = { event: event || "message", data: data.join("\n") };
@@ -26,9 +28,15 @@ export async function* parseSSE(body: ReadableStream<Uint8Array>): AsyncGenerato
     for (;;) {
       const { done, value } = await reader.read();
       buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
+      if (skipLF && buffer) {
+        if (buffer[0] === "\n") buffer = buffer.slice(1);
+        skipLF = false;
+      }
       let nl: number;
       while ((nl = buffer.search(/\r\n|\r|\n/)) !== -1) {
         const line = buffer.slice(0, nl);
+        // A standalone `\r` ends the line now; if it was half of a CRLF split across chunks, the `\n` is dropped next chunk.
+        if (nl === buffer.length - 1 && buffer[nl] === "\r") skipLF = true;
         buffer = buffer.slice(nl + (buffer.startsWith("\r\n", nl) ? 2 : 1));
         if (line === "") {
           const m = flush();
@@ -56,6 +64,8 @@ export async function* parseSSE(body: ReadableStream<Uint8Array>): AsyncGenerato
       }
     }
   } finally {
+    // An early stop (break, return) closes the body instead of leaving the connection open.
+    await reader.cancel().catch(() => {});
     reader.releaseLock();
   }
 }

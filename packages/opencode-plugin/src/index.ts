@@ -6,12 +6,32 @@ import { tool } from "@opencode-ai/plugin"
 
 const DEFAULT_BASE_URL = "https://api.opentype.dev"
 
-export type OpenTypeOptions = { apiKey?: string; baseUrl?: string }
+export type OpenTypeOptions = {
+  apiKey?: string
+  baseUrl?: string
+  /** Per-request deadline in ms. Default 170 000, above the longest run deadline. */
+  timeoutMs?: number
+}
 
 type Fetch = typeof fetch
 
+const DEFAULT_TIMEOUT_MS = 170_000
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"])
+
+/** The key is only ever sent over HTTPS; plain HTTP is allowed for a local server. */
+function checkBaseUrl(raw: string): string {
+  const url = new URL(raw)
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && LOCAL_HOSTS.has(url.hostname))) {
+    throw new Error(`OpenType base URL must use https (http only for localhost): ${raw}`)
+  }
+  return raw.replace(/\/+$/, "")
+}
+
+const PAID = new Set(["/v1/runs", "/v1/router/select"])
+
 export function createClient(opts: OpenTypeOptions = {}, fetchImpl: Fetch = fetch) {
-  const baseUrl = (opts.baseUrl ?? process.env.OPENTYPE_BASE_URL ?? DEFAULT_BASE_URL).replace(/\/+$/, "")
+  const baseUrl = checkBaseUrl(opts.baseUrl ?? process.env.OPENTYPE_BASE_URL ?? DEFAULT_BASE_URL)
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
   return async function call(method: string, path: string, body?: unknown, idempotencyKey?: string) {
     // Read the key at call time, so the tools still register without one.
     const apiKey = opts.apiKey ?? process.env.OPENTYPE_API_KEY
@@ -22,13 +42,27 @@ export function createClient(opts: OpenTypeOptions = {}, fetchImpl: Fetch = fetc
     }
     const headers: Record<string, string> = { Authorization: `Bearer ${apiKey}`, Accept: "application/json" }
     if (body !== undefined) headers["Content-Type"] = "application/json"
-    if (method === "POST" && path === "/v1/runs") headers["Idempotency-Key"] = idempotencyKey ?? crypto.randomUUID()
-    const res = await fetchImpl(baseUrl + path, {
-      method,
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-    })
-    const text = await res.text()
+    // A new key per paid call. A failure names it, and passing it back as `idempotency_key` replays that run instead of paying again.
+    const key = method === "POST" && PAID.has(path) ? (idempotencyKey ?? crypto.randomUUID()) : undefined
+    if (key) headers["Idempotency-Key"] = key
+    const replay = key ? ` Retry with idempotency_key "${key}" to replay it instead of paying again.` : ""
+    let res: Response
+    let text: string
+    try {
+      res = await fetchImpl(baseUrl + path, {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: AbortSignal.timeout(timeoutMs),
+      })
+      text = await res.text()
+    } catch (cause) {
+      const timedOut = (cause as Error)?.name === "TimeoutError"
+      throw new Error(
+        `${timedOut ? `OpenType API did not answer within ${timeoutMs} ms` : `OpenType API unreachable: ${(cause as Error)?.message ?? cause}`}.${replay}`,
+        { cause },
+      )
+    }
     let json: any
     try {
       json = text ? JSON.parse(text) : null
@@ -38,7 +72,7 @@ export function createClient(opts: OpenTypeOptions = {}, fetchImpl: Fetch = fetc
     if (!res.ok) {
       const err = json?.error
       const detail = err ? `${err.code}: ${err.message}${err.request_id ? ` (request ${err.request_id})` : ""}` : text
-      throw new Error(`OpenType API ${res.status} ${detail}`.trim())
+      throw new Error(`OpenType API ${res.status} ${detail}`.trim() + (res.status >= 500 ? replay : ""))
     }
     return json
   }
@@ -95,7 +129,7 @@ export function createTools(opts: OpenTypeOptions = {}, fetchImpl: Fetch = fetch
         instructions: z.string().optional().describe("Shared context for all questions."),
         draws: z.number().int().min(1).max(8).optional().describe("Noise draws to average, 1-8."),
         model: z.enum(["neon-1.1", "neon-latest"]).optional(),
-        idempotency_key: z.string().optional().describe("Stable key so a retry replays instead of re-billing."),
+        idempotency_key: z.string().min(1).optional().describe("Retrying after an error? Pass the key that error named, so the retry replays the run instead of paying again."),
       },
       async execute({ idempotency_key, ...a }) {
         const run = await call("POST", "/v1/runs", drop({ kind: "decision", max_output_tokens: 16, ...a }), idempotency_key)
@@ -112,7 +146,7 @@ export function createTools(opts: OpenTypeOptions = {}, fetchImpl: Fetch = fetch
         schema: z.record(z.string(), z.any()).describe("JSON Schema the answer must satisfy."),
         max_output_tokens: z.number().int().min(1),
         deadline_ms: z.number().int().min(0).optional(),
-        idempotency_key: z.string().optional(),
+        idempotency_key: z.string().min(1).optional().describe("Retrying after an error? Pass the key that error named."),
       },
       async execute({ idempotency_key, ...a }) {
         const run = await call("POST", "/v1/runs", drop({ kind: "verdict", ...a }), idempotency_key)
@@ -152,11 +186,12 @@ export function createTools(opts: OpenTypeOptions = {}, fetchImpl: Fetch = fetch
             modalities: z.array(z.string()).optional(),
           })
           .optional(),
+        idempotency_key: z.string().min(1).optional().describe("Retrying after an error? Pass the key that error named."),
       },
-      async execute(a) {
+      async execute({ idempotency_key, ...a }) {
         if (!a.prompt === !a.messages) throw new Error("Pass exactly one of `prompt` or `messages`.")
         if (a.weights && (a.policy ?? "balanced") !== "balanced") throw new Error("`weights` requires policy `balanced`.")
-        const r = await call("POST", "/v1/router/select", drop(a))
+        const r = await call("POST", "/v1/router/select", drop(a), idempotency_key)
         return { title: `route: ${r?.model?.id ?? "?"}`, output: `${routeSummary(r)}\n\n${JSON.stringify(r, null, 2)}` }
       },
     }),

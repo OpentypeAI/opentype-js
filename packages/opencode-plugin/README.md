@@ -29,7 +29,7 @@ The plugin registers the six OpenType tools directly in OpenCode (no MCP process
 {
   "$schema": "https://opencode.ai/config.json",
   "plugin": ["@opentype/opencode-plugin"],
-  "instructions": ["node_modules/@opentype/opencode-plugin/instructions/opentype.md"]
+  "instructions": ["https://raw.githubusercontent.com/OpentypeAI/opentype-js/main/packages/opencode-plugin/instructions/opentype.md"]
 }
 ```
 

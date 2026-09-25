@@ -10,11 +10,11 @@ export class Keys {
   get(keyId: string, options?: RequestOptions): Promise<WithRequestId<Key>> {
     return this.core.request({ method: "GET", path: `/v1/keys/${encodeURIComponent(keyId)}`, options });
   }
-  /** Idempotent: revoking a revoked key returns it again. */
+  /** Console sessions only: an API-key caller gets `403`. Idempotent: revoking a revoked key returns it again. */
   revoke(keyId: string, options?: RequestOptions): Promise<WithRequestId<Key>> {
     return this.core.request({ method: "DELETE", path: `/v1/keys/${encodeURIComponent(keyId)}`, options });
   }
-  /** Returns the new secret, once. */
+  /** Console sessions only: an API-key caller gets `403`. Returns the new secret, once. */
   rotate(keyId: string, options?: RequestOptions): Promise<WithRequestId<KeyWithSecret>> {
     return this.core.request({ method: "POST", path: `/v1/keys/${encodeURIComponent(keyId)}/rotate`, options });
   }

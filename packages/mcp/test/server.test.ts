@@ -71,6 +71,18 @@ describe("opentype MCP server", () => {
     expect(r.structuredContent).toMatchObject({ run_id: "run_1" });
   });
 
+  it("decodes object and array arguments a host sent as JSON strings", async () => {
+    const sdk = mockSdk();
+    const client = await connect({ client: sdk as unknown as OpenType });
+    await client.callTool({
+      name: "opentype_verdict",
+      arguments: { messages: '[{"role":"user","content":"x"}]', schema: '{"type":"object"}', max_output_tokens: 8 },
+    });
+    expect(sdk.verdict).toHaveBeenCalledWith(
+      expect.objectContaining({ messages: [{ role: "user", content: "x" }], schema: { type: "object" } }),
+    );
+  });
+
   it("opentype_verdict", async () => {
     const sdk = mockSdk();
     const client = await connect({ client: sdk as unknown as OpenType });

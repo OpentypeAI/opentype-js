@@ -35,17 +35,27 @@ export function openTypeTools(source?: ClientSource) {
     parameters: t.inputSchema,
     strict: false,
   }));
-  const parse = (s: string) => (s ? JSON.parse(s) : {});
+  // Malformed model arguments become an error result, so every tool call still gets its answer.
+  const run = async (name: string, args: string) => {
+    let parsed: unknown;
+    try {
+      parsed = args ? JSON.parse(args) : {};
+    } catch (e) {
+      return `invalid_arguments: ${(e as Error).message}`;
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return "invalid_arguments: tool arguments must be a JSON object";
+    }
+    return (await runTool(client, name, parsed)).text;
+  };
 
   /** Chat Completions: returns the `role: "tool"` message to append. */
   async function handle(call: ChatToolCall) {
-    const r = await runTool(client, call.function.name, parse(call.function.arguments));
-    return { role: "tool" as const, tool_call_id: call.id, content: r.text };
+    return { role: "tool" as const, tool_call_id: call.id, content: await run(call.function.name, call.function.arguments) };
   }
   /** Responses API: returns the `function_call_output` item to append. */
   async function handleResponse(call: ResponsesToolCall) {
-    const r = await runTool(client, call.name, parse(call.arguments));
-    return { type: "function_call_output" as const, call_id: call.call_id, output: r.text };
+    return { type: "function_call_output" as const, call_id: call.call_id, output: await run(call.name, call.arguments) };
   }
   return { definitions, responsesDefinitions, handle, handleResponse };
 }

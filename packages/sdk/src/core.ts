@@ -48,7 +48,7 @@ export interface RequestOptions {
 }
 
 export interface CreateOptions extends RequestOptions {
-  /** Reused on a network error; a 5xx retry sends `<key>:r1`, `<key>:r2`, ... Default: a random UUID per call. */
+  /** Sent unchanged on every attempt, so a retry after a lost response replays the same run. Default: a random UUID per call. */
   idempotencyKey?: string | undefined;
 }
 
@@ -57,18 +57,17 @@ export interface FinalRequest {
   path: string;
   query?: Record<string, string | number | boolean | undefined | null> | undefined;
   body?: unknown;
-  /** Send an `Idempotency-Key` header and apply the create retry rules. */
+  /**
+   * A paid POST: send one `Idempotency-Key` on every attempt and retry only
+   * when no response arrived. A 5xx is not retried: the paid call behind it
+   * may already have run, so paying again is the caller's decision.
+   * A plain POST (checkout, rotate) is never retried.
+   */
   idempotent?: boolean;
   /** Return the raw `Response` (for SSE) instead of parsed JSON. */
   raw?: boolean;
   /** Throw `RunPendingError` on `202`. */
   pendingIsError?: boolean;
-  /**
-   * Allow retries on a POST that is not `idempotent`. GET, PUT and DELETE are
-   * always retryable; a plain POST (checkout, rotate) is not, so a lost
-   * response never rotates a key twice.
-   */
-  retryable?: boolean;
   options?: CreateOptions | undefined;
 }
 
@@ -91,8 +90,10 @@ function randomKey(): string {
   });
 }
 
-const sleep = (ms: number, signal?: AbortSignal) =>
+/** @internal Rejects with the signal's reason when it aborts, before or during the wait. */
+export const sleep = (ms: number, signal?: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason);
     if (ms <= 0) return resolve();
     const t = setTimeout(() => {
       signal?.removeEventListener("abort", onAbort);
@@ -166,10 +167,9 @@ export class Core {
   async request<T>(req: FinalRequest): Promise<T> {
     const o = req.options ?? {};
     const safe = req.method !== "POST" && req.method !== "PATCH";
-    const maxRetries = safe || req.idempotent || req.retryable ? (o.maxRetries ?? this.maxRetries) : 0;
+    const maxRetries = safe || req.idempotent ? (o.maxRetries ?? this.maxRetries) : 0;
     const timeout = o.timeout ?? this.timeout;
-    const baseKey = req.idempotent ? (o.idempotencyKey ?? randomKey()) : undefined;
-    let keySuffix = 0; // bumped only after a 5xx: that key's stored run will not run again
+    const key = req.idempotent ? (o.idempotencyKey ?? randomKey()) : undefined;
     const url = this.url(req.path, req.query);
 
     for (let attempt = 0; ; attempt++) {
@@ -181,14 +181,20 @@ export class Core {
         ...o.headers,
       };
       if (req.body !== undefined) headers["Content-Type"] = "application/json";
-      if (baseKey) headers["Idempotency-Key"] = keySuffix === 0 ? baseKey : `${baseKey}:r${keySuffix}`;
+      if (key) headers["Idempotency-Key"] = key;
 
       const timeoutCtl = new AbortController();
       const timer = setTimeout(() => timeoutCtl.abort(), timeout);
       const onCallerAbort = () => timeoutCtl.abort();
       o.signal?.addEventListener("abort", onCallerAbort, { once: true });
 
+      const done = () => {
+        clearTimeout(timer);
+        o.signal?.removeEventListener("abort", onCallerAbort);
+      };
+
       let res: Response;
+      let text: string | undefined;
       try {
         // The global is read per call, so a fetch patched after construction (tests, tracing) is honoured.
         res = await (this.customFetch ?? (globalThis.fetch as Fetch))(url, {
@@ -197,32 +203,74 @@ export class Core {
           body: req.body === undefined ? undefined : JSON.stringify(req.body),
           signal: timeoutCtl.signal,
         });
+        // The deadline and the caller's signal cover the body too, not only the headers.
+        if (!(req.raw && res.ok)) text = await res.text();
       } catch (cause) {
-        clearTimeout(timer);
-        o.signal?.removeEventListener("abort", onCallerAbort);
+        done();
         if (o.signal?.aborted) throw o.signal.reason ?? cause;
-        const timedOut = timeoutCtl.signal.aborted;
-        const err = timedOut
+        const err = timeoutCtl.signal.aborted
           ? new TimeoutError({ code: "timeout", message: `Request timed out after ${timeout} ms`, cause })
           : new APIConnectionError({ code: "connection_error", message: `Connection error: ${String((cause as Error)?.message ?? cause)}`, cause });
+        err.idempotencyKey = key;
         if (attempt >= maxRetries) throw err;
-        // No response: the run may exist, so the same key is reused.
+        // No usable response (no headers, or a body cut off): the run may exist, so the same key is reused.
         await sleep(this.backoff(attempt, undefined), o.signal);
         continue;
       }
-      if (!req.raw) clearTimeout(timer);
-      o.signal?.removeEventListener("abort", onCallerAbort);
       const requestId = res.headers.get("x-request-id");
 
       if (res.ok) {
         if (req.raw) {
-          clearTimeout(timer);
-          return res as T;
+          // A stream stays bounded by `timeout` and abortable by the caller's signal while it is read;
+          // both are released once the body ends, fails or is cancelled.
+          if (!res.body) {
+            done();
+            return res as T;
+          }
+          const reader = res.body.getReader();
+          const body = new ReadableStream<Uint8Array>({
+            async pull(ctl) {
+              try {
+                const { done: end, value } = await reader.read();
+                if (end) {
+                  done();
+                  ctl.close();
+                } else ctl.enqueue(value);
+              } catch (e) {
+                done();
+                // Our deadline cut the body off, not the caller: say so, as a non-stream body does.
+                ctl.error(
+                  timeoutCtl.signal.aborted && !o.signal?.aborted
+                    ? new TimeoutError({ code: "timeout", message: `Stream timed out after ${timeout} ms`, cause: e })
+                    : e,
+                );
+              }
+            },
+            async cancel(reason) {
+              done();
+              await reader.cancel(reason);
+            },
+          });
+          return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers }) as T;
         }
-        const text = await res.text();
-        const data = text ? (JSON.parse(text) as T) : (undefined as T);
+        done();
+        let data: T;
+        try {
+          data = text ? (JSON.parse(text) as T) : (undefined as T);
+        } catch (cause) {
+          const err = new OpenTypeError({
+            status: res.status,
+            code: "invalid_response",
+            message: "The response body is not JSON",
+            requestId,
+            headers: res.headers,
+            cause,
+          });
+          err.idempotencyKey = key;
+          throw err;
+        }
         if (res.status === 202 && req.pendingIsError) {
-          throw new RunPendingError({
+          const err = new RunPendingError({
             status: 202,
             code: "run_pending",
             message:
@@ -231,14 +279,18 @@ export class Core {
             headers: res.headers,
             run: attachRequestId(data, requestId),
           });
+          err.idempotencyKey = key;
+          throw err;
         }
         return attachRequestId(data, requestId) as T;
       }
 
-      clearTimeout(timer);
-      const err = errorFromResponse(res.status, res.headers, await res.text());
+      done();
+      const err = errorFromResponse(res.status, res.headers, text ?? "");
+      err.idempotencyKey = key;
       if (attempt >= maxRetries || !this.shouldRetryStatus(res.status)) throw err;
-      if (res.status >= 500) keySuffix++;
+      // A paid POST answered: a 5xx may already have been charged, so only a status the caller listed is retried.
+      if (req.idempotent && !this.retryStatuses.has(res.status)) throw err;
       await sleep(this.backoff(attempt, parseRetryAfter(res.headers.get("retry-after"))), o.signal);
     }
   }

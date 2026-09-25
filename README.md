@@ -12,11 +12,21 @@ Docs: https://docs.opentype.dev
 
 ## Install
 
-> The packages are not on npm yet. Until the first release, build from this repo (see Development).
+The packages are not on npm yet. Until the first release, build them from this repository and
+install the packed tarballs (Node 18 or later, pnpm 10):
 
 ```sh
-npm install @opentype/sdk
+git clone https://github.com/OpentypeAI/opentype-js
+cd opentype-js
+pnpm install && pnpm build
+(cd packages/sdk && pnpm pack --pack-destination ../../dist)
+(cd packages/mcp && pnpm pack --pack-destination ../../dist)
+
+# in your project
+npm install /path/to/opentype-js/dist/opentype-sdk-0.1.0.tgz
 ```
+
+Once released, this becomes `npm install @opentype/sdk`.
 
 ## Quickstart
 
@@ -41,6 +51,9 @@ console.log(d.answer); // { type: "noul", probability: 0.93 }
 MCP server for a coding agent:
 
 ```sh
+# until the npm release, point at the local build:
+claude mcp add opentype -e OPENTYPE_API_KEY=otsk_... -- node /path/to/opentype-js/packages/mcp/dist/bin.js
+# after the release:
 claude mcp add opentype -e OPENTYPE_API_KEY=otsk_... -- npx -y @opentype/mcp
 ```
 

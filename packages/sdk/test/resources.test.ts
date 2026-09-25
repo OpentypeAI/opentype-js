@@ -129,6 +129,27 @@ describe("SSE", () => {
     ]);
   });
 
+  it("does not dispatch early when a CRLF is split between chunks", async () => {
+    const msgs = [];
+    for await (const m of parseSSE(streamOf(["event: state\r", "\ndata: a\r", "\ndata: b\r\n\r", "\n"]))) msgs.push(m);
+    expect(msgs).toEqual([{ event: "state", data: "a\nb" }]);
+  });
+
+  it("dispatches an event ended by standalone CRs at once, while the stream stays open", async () => {
+    let push!: (s: string) => void;
+    const body = new ReadableStream<Uint8Array>({
+      start(ctl) {
+        push = (s) => ctl.enqueue(new TextEncoder().encode(s));
+      },
+    });
+    const it = parseSSE(body)[Symbol.asyncIterator]();
+    push("data: x\r\r");
+    await expect(it.next()).resolves.toEqual({ done: false, value: { event: "message", data: "x" } });
+    push("\ndata: y\n\n");
+    await expect(it.next()).resolves.toEqual({ done: false, value: { event: "message", data: "y" } });
+    await it.return?.(undefined);
+  });
+
   it("joins multi-line data and flushes a final frame without a blank line", async () => {
     const msgs = [];
     for await (const m of parseSSE(streamOf(["data: a\ndata: b\n\ndata: tail"]))) msgs.push(m);
@@ -159,5 +180,35 @@ describe("waitFor", () => {
     const r = await client().runs.waitFor("run_1", { interval: 1 });
     expect(r.state).toBe("completed");
     expect(n).toBe(3);
+  });
+
+  it("throws wait_timeout instead of returning a run that is not finished", async () => {
+    server.use(http.get(`${BASE}/v1/runs/run_1`, () => HttpResponse.json(run({ state: "running" }))));
+    await expect(client().runs.waitFor("run_1", { interval: 5, timeout: 30 })).rejects.toMatchObject({ code: "wait_timeout" });
+  });
+
+  it("does not retry a failed poll past the deadline", async () => {
+    let n = 0;
+    server.use(
+      http.get(`${BASE}/v1/runs/run_1`, () => {
+        n++;
+        return HttpResponse.error();
+      }),
+    );
+    await expect(client().runs.waitFor("run_1", { timeout: 1000 })).rejects.toMatchObject({ code: "connection_error" });
+    expect(n).toBe(1);
+  });
+
+  it("an abort during the pause between polls surfaces the abort reason", async () => {
+    server.use(http.get(`${BASE}/v1/runs/run_1`, () => HttpResponse.json(run({ state: "running" }))));
+    const ctl = new AbortController();
+    const p = client().runs.waitFor("run_1", { interval: 1000, timeout: 5000, signal: ctl.signal });
+    setTimeout(() => ctl.abort(new Error("stop")), 30);
+    await expect(p).rejects.toThrow("stop");
+  });
+
+  it("bounds each poll by the time left", async () => {
+    server.use(http.get(`${BASE}/v1/runs/run_1`, () => new Promise<Response>(() => {})));
+    await expect(client().runs.waitFor("run_1", { timeout: 50 })).rejects.toMatchObject({ code: "wait_timeout" });
   });
 });

@@ -17,6 +17,27 @@ export interface ServerOptions {
 }
 
 /**
+ * Some MCP hosts send object and array arguments as JSON strings. Decode a
+ * top-level string whose schema type is `object` or `array`; leave anything
+ * that does not parse to that type as it came, for the API to reject.
+ */
+export function decodeArguments(name: string, args: Record<string, unknown>): Record<string, unknown> {
+  const props = (tools.find((t) => t.name === name)?.inputSchema.properties ?? {}) as Record<string, { type?: unknown }>;
+  const out: Record<string, unknown> = { ...args };
+  for (const [k, v] of Object.entries(args)) {
+    const type = props[k]?.type;
+    if (typeof v !== "string" || (type !== "object" && type !== "array")) continue;
+    try {
+      const parsed: unknown = JSON.parse(v);
+      if (type === "array" ? Array.isArray(parsed) : typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) out[k] = parsed;
+    } catch {
+      // not JSON: keep the string
+    }
+  }
+  return out;
+}
+
+/**
  * Build the MCP server. Tools are always listed; a missing key is reported
  * when a tool is called, so hosts can still show what the server offers.
  */
@@ -57,7 +78,7 @@ export function createServer(opts: ServerOptions = {}): Server {
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
-    const r = await runTool(client, req.params.name, req.params.arguments ?? {});
+    const r = await runTool(client, req.params.name, decodeArguments(req.params.name, req.params.arguments ?? {}));
     return {
       content: [{ type: "text" as const, text: r.text }],
       ...(r.data && typeof r.data === "object" && !Array.isArray(r.data)

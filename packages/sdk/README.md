@@ -9,6 +9,10 @@ TypeScript client for the [OpenType](https://opentype.dev) API: calibrated decis
 
 ## Install
 
+Not on npm yet. Until the first release, build and pack it from
+[OpentypeAI/opentype-js](https://github.com/OpentypeAI/opentype-js#install) and install the tarball.
+After the release:
+
 ```sh
 npm install @opentype/sdk
 ```
@@ -172,9 +176,11 @@ Every response has a non-enumerable `_requestId` (the `x-request-id` header).
 
 ## Retries and idempotency
 
-- Every `runs.create` (and so every `decide` and `verdict`) sends an `Idempotency-Key`: yours if you pass `idempotencyKey`, else a random UUID made once per call.
-- No response (network error or timeout): retried with the **same** key, because the run may already exist.
-- `500`, `503`, `504`: retried with a **new** key (`<key>:r1`, `<key>:r2`, ...), because a stored run does not run again under its key.
+- Every paid call (`runs.create`, and so `decide` and `verdict`, plus `router.select` and `route`) sends an `Idempotency-Key`: yours if you pass `idempotencyKey`, else a random UUID made once per call.
+- No response (network error or timeout): retried with the **same** key, so the retry replays the stored run instead of paying for a second one.
+- A `5xx` on a paid call is **not** retried: the call behind it may already have been charged. The error carries the `requestId`; send the request again with a new key if you want a new attempt. Reads (`GET`) are retried on `5xx`.
+- Every error from a paid call carries the key it sent in `error.idempotencyKey`, generated or yours. Sending the same request with that key replays the stored result instead of paying again.
+- `runs.waitFor` throws `TimeoutError` with code `wait_timeout` when the run is not finished within `timeout`; each poll is a single attempt bounded by the time left, and an abort ends the wait at once.
 - Exponential backoff (1 s, 2 s, 4 s, ...) with full jitter; a `Retry-After` header wins.
 - `4xx`, including `402` and `429`, is never retried unless you list it in `retryStatuses`.
 - A `202` replay (a run under that key is still `pending`) throws `RunPendingError` with the run in `error.run`: retry with a new key, or read it later with `runs.get`.

@@ -1,5 +1,6 @@
 import type { Core, CreateOptions, RequestOptions, WithRequestId } from "../core.js";
-import { DEFAULT_TIMEOUT_MS } from "../core.js";
+import { DEFAULT_TIMEOUT_MS, sleep } from "../core.js";
+import { TimeoutError } from "../errors.js";
 import { runEvents } from "../streaming.js";
 import type { CreateRunRequest, Run, RunEvent, RunList } from "../types.js";
 
@@ -73,16 +74,33 @@ export class Runs {
     yield* runEvents(res.body);
   }
 
-  /** Poll until the run is `completed` or `failed`. */
+  /**
+   * Poll until the run is `completed` or `failed`. `timeout` bounds the whole
+   * wait, each poll included; past it, throws `TimeoutError` (code `wait_timeout`).
+   */
   async waitFor(
     runId: string,
     opts: { timeout?: number; interval?: number; signal?: AbortSignal } = {},
   ): Promise<WithRequestId<Run>> {
     const deadline = Date.now() + (opts.timeout ?? DEFAULT_TIMEOUT_MS);
     for (;;) {
-      const run = await this.get(runId, { signal: opts.signal });
-      if (TERMINAL.has(run.state) || Date.now() >= deadline) return run;
-      await new Promise((r) => setTimeout(r, opts.interval ?? 1000));
+      const left = deadline - Date.now();
+      if (left <= 0) {
+        throw new TimeoutError({ code: "wait_timeout", message: `Run ${runId} did not finish within the wait timeout` });
+      }
+      // One attempt per poll: client retries would each get `left` again and overrun the deadline.
+      let run: WithRequestId<Run>;
+      try {
+        run = await this.get(runId, { signal: opts.signal, timeout: left, maxRetries: 0 });
+      } catch (e) {
+        // The poll ran out of the time left: that is the wait expiring, not a failed request.
+        if (e instanceof TimeoutError && e.code === "timeout") {
+          throw new TimeoutError({ code: "wait_timeout", message: `Run ${runId} did not finish within the wait timeout`, cause: e });
+        }
+        throw e;
+      }
+      if (TERMINAL.has(run.state)) return run;
+      await sleep(Math.min(opts.interval ?? 1000, Math.max(0, deadline - Date.now())), opts.signal);
     }
   }
 }

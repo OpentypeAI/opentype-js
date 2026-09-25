@@ -100,7 +100,7 @@ export type RouteParams = {
   /** `balanced` only: your own quality/cost/speed trade-off, normalized server-side. */
   weights?: RouterWeights;
   models?: RouterModelFilters;
-} & RequestOptions;
+} & CreateOptions;
 
 function pickOptions<T extends CreateOptions>(p: T): CreateOptions {
   return { idempotencyKey: p.idempotencyKey, signal: p.signal, timeout: p.timeout, maxRetries: p.maxRetries, headers: p.headers };
