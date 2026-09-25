@@ -129,6 +129,12 @@ describe("SSE", () => {
     ]);
   });
 
+  it("does not dispatch early when a CRLF is split between chunks", async () => {
+    const msgs = [];
+    for await (const m of parseSSE(streamOf(["event: state\r", "\ndata: a\r", "\ndata: b\r\n\r", "\n"]))) msgs.push(m);
+    expect(msgs).toEqual([{ event: "state", data: "a\nb" }]);
+  });
+
   it("joins multi-line data and flushes a final frame without a blank line", async () => {
     const msgs = [];
     for await (const m of parseSSE(streamOf(["data: a\ndata: b\n\ndata: tail"]))) msgs.push(m);
@@ -159,5 +165,15 @@ describe("waitFor", () => {
     const r = await client().runs.waitFor("run_1", { interval: 1 });
     expect(r.state).toBe("completed");
     expect(n).toBe(3);
+  });
+
+  it("throws wait_timeout instead of returning a run that is not finished", async () => {
+    server.use(http.get(`${BASE}/v1/runs/run_1`, () => HttpResponse.json(run({ state: "running" }))));
+    await expect(client().runs.waitFor("run_1", { interval: 5, timeout: 30 })).rejects.toMatchObject({ code: "wait_timeout" });
+  });
+
+  it("bounds each poll by the time left", async () => {
+    server.use(http.get(`${BASE}/v1/runs/run_1`, () => new Promise<Response>(() => {})));
+    await expect(client().runs.waitFor("run_1", { timeout: 50 })).rejects.toMatchObject({ code: "timeout" });
   });
 });

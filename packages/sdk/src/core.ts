@@ -48,7 +48,7 @@ export interface RequestOptions {
 }
 
 export interface CreateOptions extends RequestOptions {
-  /** Reused on a network error; a 5xx retry sends `<key>:r1`, `<key>:r2`, ... Default: a random UUID per call. */
+  /** Sent unchanged on every attempt, so a retry after a lost response replays the same run. Default: a random UUID per call. */
   idempotencyKey?: string | undefined;
 }
 
@@ -57,18 +57,17 @@ export interface FinalRequest {
   path: string;
   query?: Record<string, string | number | boolean | undefined | null> | undefined;
   body?: unknown;
-  /** Send an `Idempotency-Key` header and apply the create retry rules. */
+  /**
+   * A paid POST: send one `Idempotency-Key` on every attempt and retry only
+   * when no response arrived. A 5xx is not retried: the paid call behind it
+   * may already have run, so paying again is the caller's decision.
+   * A plain POST (checkout, rotate) is never retried.
+   */
   idempotent?: boolean;
   /** Return the raw `Response` (for SSE) instead of parsed JSON. */
   raw?: boolean;
   /** Throw `RunPendingError` on `202`. */
   pendingIsError?: boolean;
-  /**
-   * Allow retries on a POST that is not `idempotent`. GET, PUT and DELETE are
-   * always retryable; a plain POST (checkout, rotate) is not, so a lost
-   * response never rotates a key twice.
-   */
-  retryable?: boolean;
   options?: CreateOptions | undefined;
 }
 
@@ -166,10 +165,9 @@ export class Core {
   async request<T>(req: FinalRequest): Promise<T> {
     const o = req.options ?? {};
     const safe = req.method !== "POST" && req.method !== "PATCH";
-    const maxRetries = safe || req.idempotent || req.retryable ? (o.maxRetries ?? this.maxRetries) : 0;
+    const maxRetries = safe || req.idempotent ? (o.maxRetries ?? this.maxRetries) : 0;
     const timeout = o.timeout ?? this.timeout;
-    const baseKey = req.idempotent ? (o.idempotencyKey ?? randomKey()) : undefined;
-    let keySuffix = 0; // bumped only after a 5xx: that key's stored run will not run again
+    const key = req.idempotent ? (o.idempotencyKey ?? randomKey()) : undefined;
     const url = this.url(req.path, req.query);
 
     for (let attempt = 0; ; attempt++) {
@@ -181,7 +179,7 @@ export class Core {
         ...o.headers,
       };
       if (req.body !== undefined) headers["Content-Type"] = "application/json";
-      if (baseKey) headers["Idempotency-Key"] = keySuffix === 0 ? baseKey : `${baseKey}:r${keySuffix}`;
+      if (key) headers["Idempotency-Key"] = key;
 
       const timeoutCtl = new AbortController();
       const timer = setTimeout(() => timeoutCtl.abort(), timeout);
@@ -238,7 +236,8 @@ export class Core {
       clearTimeout(timer);
       const err = errorFromResponse(res.status, res.headers, await res.text());
       if (attempt >= maxRetries || !this.shouldRetryStatus(res.status)) throw err;
-      if (res.status >= 500) keySuffix++;
+      // A paid POST answered: a 5xx may already have been charged, so only a status the caller listed is retried.
+      if (req.idempotent && !this.retryStatuses.has(res.status)) throw err;
       await sleep(this.backoff(attempt, parseRetryAfter(res.headers.get("retry-after"))), o.signal);
     }
   }

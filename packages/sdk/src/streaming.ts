@@ -28,6 +28,8 @@ export async function* parseSSE(body: ReadableStream<Uint8Array>): AsyncGenerato
       buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
       let nl: number;
       while ((nl = buffer.search(/\r\n|\r|\n/)) !== -1) {
+        // A `\r` at the end of a chunk may be the first half of a CRLF split across chunks.
+        if (!done && nl === buffer.length - 1 && buffer[nl] === "\r") break;
         const line = buffer.slice(0, nl);
         buffer = buffer.slice(nl + (buffer.startsWith("\r\n", nl) ? 2 : 1));
         if (line === "") {

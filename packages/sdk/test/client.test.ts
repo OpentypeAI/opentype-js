@@ -167,17 +167,42 @@ describe("retries and idempotency", () => {
     expect(keys).toEqual(["k1", "k1"]);
   });
 
-  it("uses a new key after a 5xx", async () => {
+  it("does not retry a paid create after a 5xx, which may already have been charged", async () => {
     const keys: string[] = [];
     server.use(
       http.post(`${BASE}/v1/runs`, ({ request }) => {
         keys.push(request.headers.get("idempotency-key")!);
-        return keys.length < 3 ? HttpResponse.json(errBody("provider_unavailable"), { status: 503 }) : HttpResponse.json(run());
+        return HttpResponse.json(errBody("provider_unavailable"), { status: 503 });
       }),
     );
-    const r = await client().runs.create({ max_output_tokens: 1 }, { idempotencyKey: "k1" });
-    expect(r.run_id).toBe("run_1");
-    expect(keys).toEqual(["k1", "k1:r1", "k1:r2"]);
+    await expect(client().runs.create({ max_output_tokens: 1 }, { idempotencyKey: "k1" })).rejects.toBeInstanceOf(ServerError);
+    expect(keys).toEqual(["k1"]);
+  });
+
+  it("router.select sends one Idempotency-Key and reuses it after a network error", async () => {
+    const keys: (string | null)[] = [];
+    server.use(
+      http.post(`${BASE}/v1/router/select`, ({ request }) => {
+        keys.push(request.headers.get("idempotency-key"));
+        return keys.length === 1 ? HttpResponse.error() : HttpResponse.json({ id: "rtr_1" });
+      }),
+    );
+    await client().router.select({ prompt: "p" });
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toBeTruthy();
+    expect(keys[1]).toBe(keys[0]);
+  });
+
+  it("router.select is not retried after a 5xx", async () => {
+    let n = 0;
+    server.use(
+      http.post(`${BASE}/v1/router/select`, () => {
+        n++;
+        return HttpResponse.json(errBody("internal_error"), { status: 500 });
+      }),
+    );
+    await expect(client().router.select({ prompt: "p" })).rejects.toBeInstanceOf(ServerError);
+    expect(n).toBe(1);
   });
 
   it("gives up after maxRetries", async () => {
