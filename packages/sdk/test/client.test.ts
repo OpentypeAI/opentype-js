@@ -179,6 +179,19 @@ describe("retries and idempotency", () => {
     expect(keys).toEqual(["k1"]);
   });
 
+  it("puts the generated key on the error so the caller can replay it", async () => {
+    const keys: string[] = [];
+    server.use(
+      http.post(`${BASE}/v1/runs`, ({ request }) => {
+        keys.push(request.headers.get("idempotency-key")!);
+        return HttpResponse.json(errBody("provider_unavailable"), { status: 503 });
+      }),
+    );
+    const e = await client().runs.create({ max_output_tokens: 1 }).catch((x) => x);
+    expect(e).toBeInstanceOf(ServerError);
+    expect(e.idempotencyKey).toBe(keys[0]);
+  });
+
   it("router.select sends one Idempotency-Key and reuses it after a network error", async () => {
     const keys: (string | null)[] = [];
     server.use(

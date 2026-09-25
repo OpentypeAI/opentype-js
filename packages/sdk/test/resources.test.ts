@@ -172,6 +172,26 @@ describe("waitFor", () => {
     await expect(client().runs.waitFor("run_1", { interval: 5, timeout: 30 })).rejects.toMatchObject({ code: "wait_timeout" });
   });
 
+  it("does not retry a failed poll past the deadline", async () => {
+    let n = 0;
+    server.use(
+      http.get(`${BASE}/v1/runs/run_1`, () => {
+        n++;
+        return HttpResponse.error();
+      }),
+    );
+    await expect(client().runs.waitFor("run_1", { timeout: 1000 })).rejects.toMatchObject({ code: "connection_error" });
+    expect(n).toBe(1);
+  });
+
+  it("an abort during the pause between polls surfaces the abort reason", async () => {
+    server.use(http.get(`${BASE}/v1/runs/run_1`, () => HttpResponse.json(run({ state: "running" }))));
+    const ctl = new AbortController();
+    const p = client().runs.waitFor("run_1", { interval: 1000, timeout: 5000, signal: ctl.signal });
+    setTimeout(() => ctl.abort(new Error("stop")), 30);
+    await expect(p).rejects.toThrow("stop");
+  });
+
   it("bounds each poll by the time left", async () => {
     server.use(http.get(`${BASE}/v1/runs/run_1`, () => new Promise<Response>(() => {})));
     await expect(client().runs.waitFor("run_1", { timeout: 50 })).rejects.toMatchObject({ code: "timeout" });

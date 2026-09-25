@@ -1,5 +1,5 @@
 import type { Core, CreateOptions, RequestOptions, WithRequestId } from "../core.js";
-import { DEFAULT_TIMEOUT_MS } from "../core.js";
+import { DEFAULT_TIMEOUT_MS, sleep } from "../core.js";
 import { TimeoutError } from "../errors.js";
 import { runEvents } from "../streaming.js";
 import type { CreateRunRequest, Run, RunEvent, RunList } from "../types.js";
@@ -88,9 +88,10 @@ export class Runs {
       if (left <= 0) {
         throw new TimeoutError({ code: "wait_timeout", message: `Run ${runId} did not finish within the wait timeout` });
       }
-      const run = await this.get(runId, { signal: opts.signal, timeout: left });
+      // One attempt per poll: client retries would each get `left` again and overrun the deadline.
+      const run = await this.get(runId, { signal: opts.signal, timeout: left, maxRetries: 0 });
       if (TERMINAL.has(run.state)) return run;
-      await new Promise((r) => setTimeout(r, Math.min(opts.interval ?? 1000, Math.max(0, deadline - Date.now()))));
+      await sleep(Math.min(opts.interval ?? 1000, Math.max(0, deadline - Date.now())), opts.signal);
     }
   }
 }

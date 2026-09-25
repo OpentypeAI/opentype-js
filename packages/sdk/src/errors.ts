@@ -23,6 +23,12 @@ export class OpenTypeError extends Error {
   /** JSON Pointer paths, present on `verdict_schema_violation`. */
   readonly violations: string[] | undefined;
   readonly headers: Headers | undefined;
+  /**
+   * The `Idempotency-Key` the failed request sent, generated or yours. Send the
+   * same request again with it to replay a run that may already have been
+   * charged instead of paying for a new one.
+   */
+  idempotencyKey: string | undefined;
 
   constructor(init: ErrorInit) {
     super(init.message, init.cause === undefined ? undefined : { cause: init.cause });

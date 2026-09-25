@@ -90,8 +90,10 @@ function randomKey(): string {
   });
 }
 
-const sleep = (ms: number, signal?: AbortSignal) =>
+/** @internal Rejects with the signal's reason when it aborts, before or during the wait. */
+export const sleep = (ms: number, signal?: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason);
     if (ms <= 0) return resolve();
     const t = setTimeout(() => {
       signal?.removeEventListener("abort", onAbort);
@@ -203,6 +205,7 @@ export class Core {
         const err = timedOut
           ? new TimeoutError({ code: "timeout", message: `Request timed out after ${timeout} ms`, cause })
           : new APIConnectionError({ code: "connection_error", message: `Connection error: ${String((cause as Error)?.message ?? cause)}`, cause });
+        err.idempotencyKey = key;
         if (attempt >= maxRetries) throw err;
         // No response: the run may exist, so the same key is reused.
         await sleep(this.backoff(attempt, undefined), o.signal);
@@ -235,6 +238,7 @@ export class Core {
 
       clearTimeout(timer);
       const err = errorFromResponse(res.status, res.headers, await res.text());
+      err.idempotencyKey = key;
       if (attempt >= maxRetries || !this.shouldRetryStatus(res.status)) throw err;
       // A paid POST answered: a 5xx may already have been charged, so only a status the caller listed is retried.
       if (req.idempotent && !this.retryStatuses.has(res.status)) throw err;
