@@ -238,7 +238,12 @@ export class Core {
                 } else ctl.enqueue(value);
               } catch (e) {
                 done();
-                ctl.error(e);
+                // Our deadline cut the body off, not the caller: say so, as a non-stream body does.
+                ctl.error(
+                  timeoutCtl.signal.aborted && !o.signal?.aborted
+                    ? new TimeoutError({ code: "timeout", message: `Stream timed out after ${timeout} ms`, cause: e })
+                    : e,
+                );
               }
             },
             async cancel(reason) {

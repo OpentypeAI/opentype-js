@@ -351,6 +351,13 @@ describe("retries and idempotency", () => {
     expect(e.idempotencyKey).toBe("k9");
   });
 
+  it("a stream stalled past the timeout ends with TimeoutError", async () => {
+    const ot = new OpenType({ apiKey: "otsk_test", baseURL: BASE, timeout: 40, fetch: stallingFetch("text/event-stream") });
+    const e = await ot.runs.stream("run_1")[Symbol.asyncIterator]().next().catch((x) => x);
+    expect(e).toBeInstanceOf(TimeoutError);
+    expect(e.code).toBe("timeout");
+  });
+
   it("keeps a stream abortable after its headers arrive", async () => {
     const ot = new OpenType({ apiKey: "otsk_test", baseURL: BASE, fetch: stallingFetch("text/event-stream") });
     const ctl = new AbortController();
