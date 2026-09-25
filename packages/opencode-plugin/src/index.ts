@@ -6,12 +6,43 @@ import { tool } from "@opencode-ai/plugin"
 
 const DEFAULT_BASE_URL = "https://api.opentype.dev"
 
-export type OpenTypeOptions = { apiKey?: string; baseUrl?: string }
+export type OpenTypeOptions = {
+  apiKey?: string
+  baseUrl?: string
+  /** Per-request deadline in ms. Default 170 000, above the longest run deadline. */
+  timeoutMs?: number
+}
 
 type Fetch = typeof fetch
 
+const DEFAULT_TIMEOUT_MS = 170_000
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"])
+
+/** The key is only ever sent over HTTPS; plain HTTP is allowed for a local server. */
+function checkBaseUrl(raw: string): string {
+  const url = new URL(raw)
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && LOCAL_HOSTS.has(url.hostname))) {
+    throw new Error(`OpenType base URL must use https (http only for localhost): ${raw}`)
+  }
+  return raw.replace(/\/+$/, "")
+}
+
+/**
+ * The same paid request gets the same key, so an agent that retries a tool
+ * call after a lost answer replays the stored run instead of paying twice.
+ * Pass your own `idempotency_key` to ask for a new run on the same input.
+ */
+async function derivedKey(path: string, body: unknown): Promise<string> {
+  const bytes = new TextEncoder().encode(path + "\n" + JSON.stringify(body))
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))
+  return "oc-" + Array.from(digest, (b) => b.toString(16).padStart(2, "0")).join("").slice(0, 48)
+}
+
+const PAID = new Set(["/v1/runs", "/v1/router/select"])
+
 export function createClient(opts: OpenTypeOptions = {}, fetchImpl: Fetch = fetch) {
-  const baseUrl = (opts.baseUrl ?? process.env.OPENTYPE_BASE_URL ?? DEFAULT_BASE_URL).replace(/\/+$/, "")
+  const baseUrl = checkBaseUrl(opts.baseUrl ?? process.env.OPENTYPE_BASE_URL ?? DEFAULT_BASE_URL)
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
   return async function call(method: string, path: string, body?: unknown, idempotencyKey?: string) {
     // Read the key at call time, so the tools still register without one.
     const apiKey = opts.apiKey ?? process.env.OPENTYPE_API_KEY
@@ -22,13 +53,26 @@ export function createClient(opts: OpenTypeOptions = {}, fetchImpl: Fetch = fetc
     }
     const headers: Record<string, string> = { Authorization: `Bearer ${apiKey}`, Accept: "application/json" }
     if (body !== undefined) headers["Content-Type"] = "application/json"
-    if (method === "POST" && path === "/v1/runs") headers["Idempotency-Key"] = idempotencyKey ?? crypto.randomUUID()
-    const res = await fetchImpl(baseUrl + path, {
-      method,
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-    })
-    const text = await res.text()
+    const key = method === "POST" && PAID.has(path) ? (idempotencyKey ?? (await derivedKey(path, body))) : undefined
+    if (key) headers["Idempotency-Key"] = key
+    const replay = key ? ` Retry with idempotency_key "${key}" to replay it instead of paying again.` : ""
+    let res: Response
+    let text: string
+    try {
+      res = await fetchImpl(baseUrl + path, {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: AbortSignal.timeout(timeoutMs),
+      })
+      text = await res.text()
+    } catch (cause) {
+      const timedOut = (cause as Error)?.name === "TimeoutError"
+      throw new Error(
+        `${timedOut ? `OpenType API did not answer within ${timeoutMs} ms` : `OpenType API unreachable: ${(cause as Error)?.message ?? cause}`}.${replay}`,
+        { cause },
+      )
+    }
     let json: any
     try {
       json = text ? JSON.parse(text) : null
@@ -38,7 +82,7 @@ export function createClient(opts: OpenTypeOptions = {}, fetchImpl: Fetch = fetc
     if (!res.ok) {
       const err = json?.error
       const detail = err ? `${err.code}: ${err.message}${err.request_id ? ` (request ${err.request_id})` : ""}` : text
-      throw new Error(`OpenType API ${res.status} ${detail}`.trim())
+      throw new Error(`OpenType API ${res.status} ${detail}`.trim() + (res.status >= 500 ? replay : ""))
     }
     return json
   }

@@ -26,12 +26,12 @@ test("decide posts a decision run with auth and idempotency headers", async () =
     seen = { url, init }
     return new Response(JSON.stringify({ id: "run_1", status: "succeeded" }), { status: 200 })
   }) as any
-  const tools = createTools({ apiKey: "otsk_test", baseUrl: "http://x/" }, fake)
+  const tools = createTools({ apiKey: "otsk_test", baseUrl: "https://x/" }, fake)
   const r: any = await tools.opentype_decide.execute(
     { state: "s", questions: { q: { type: "noul", instructions: "yes?" } }, idempotency_key: "k1" },
     {} as any,
   )
-  assert.equal(seen.url, "http://x/v1/runs")
+  assert.equal(seen.url, "https://x/v1/runs")
   assert.equal(seen.init.headers.Authorization, "Bearer otsk_test")
   assert.equal(seen.init.headers["Idempotency-Key"], "k1")
   assert.equal(JSON.parse(seen.init.body).kind, "decision")
@@ -88,7 +88,47 @@ test("list_models task_types=true reads the taxonomy", async () => {
     url = u
     return new Response(JSON.stringify({ families: ["coding"], task_types: [{ id: "code_generation" }] }))
   }) as any
-  const r: any = await createTools({ apiKey: "otsk_test", baseUrl: "http://x" }, fake).opentype_list_models.execute({ task_types: true }, {} as any)
-  assert.equal(url, "http://x/v1/router/task-types")
+  const r: any = await createTools({ apiKey: "otsk_test", baseUrl: "https://x" }, fake).opentype_list_models.execute({ task_types: true }, {} as any)
+  assert.equal(url, "https://x/v1/router/task-types")
   assert.equal(r.title, "1 task types")
+})
+
+test("a paid call without a key sends the same derived key on a retry", async () => {
+  const keys: string[] = []
+  const fake = (async (_u: string, init: any) => {
+    keys.push(init.headers["Idempotency-Key"])
+    return new Response(JSON.stringify({ id: "run_1" }))
+  }) as any
+  const tools = createTools({ apiKey: "otsk_test" }, fake)
+  const args = { state: "s", questions: { q: { type: "noul", instructions: "yes?" } } }
+  await tools.opentype_decide.execute(args as any, {} as any)
+  await tools.opentype_decide.execute(args as any, {} as any)
+  await tools.opentype_decide.execute({ ...args, state: "other" } as any, {} as any)
+  await tools.opentype_route_model.execute({ prompt: "x" } as any, {} as any)
+  assert.equal(keys[0], keys[1])
+  assert.notEqual(keys[0], keys[2])
+  assert.match(keys[3]!, /^oc-/)
+})
+
+test("refuses a plain-http base URL except for localhost", () => {
+  assert.throws(() => createTools({ apiKey: "otsk_test", baseUrl: "http://api.example.com" }), /must use https/)
+  createTools({ apiKey: "otsk_test", baseUrl: "http://localhost:8080" })
+})
+
+test("a network failure is an actionable error carrying the replay key", async () => {
+  const fake = (async () => {
+    throw new TypeError("fetch failed")
+  }) as any
+  const tools = createTools({ apiKey: "otsk_test" }, fake)
+  await assert.rejects(
+    tools.opentype_decide.execute({ state: "s", questions: {}, idempotency_key: "k7" } as any, {} as any),
+    (e: any) => /unreachable: fetch failed/.test(e.message) && /"k7"/.test(e.message) && e.cause instanceof TypeError,
+  )
+})
+
+test("a stalled request is cut off at the deadline", async () => {
+  const fake = ((_u: string, init: any) =>
+    new Promise((_, reject) => init.signal.addEventListener("abort", () => reject(init.signal.reason)))) as any
+  const tools = createTools({ apiKey: "otsk_test", timeoutMs: 30 }, fake)
+  await assert.rejects(tools.opentype_get_run.execute({ run_id: "run_1" }, {} as any), /did not answer within 30 ms/)
 })
