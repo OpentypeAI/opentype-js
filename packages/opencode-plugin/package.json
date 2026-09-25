@@ -1,0 +1,49 @@
+{
+  "name": "@opentype/opencode-plugin",
+  "version": "0.1.0",
+  "description": "OpenType tools for OpenCode: model routing, typed decisions and verdicts with calibrated probabilities from Neon 1.1.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/OpentypeAI/opentype-js/tree/main/packages/opencode-plugin#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OpentypeAI/opentype-js.git",
+    "directory": "packages/opencode-plugin"
+  },
+  "bugs": {
+    "url": "https://github.com/OpentypeAI/opentype-js/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "opentype",
+    "model-router",
+    "decisions"
+  ],
+  "exports": {
+    ".": "./src/index.ts",
+    "./instructions/opentype.md": "./instructions/opentype.md"
+  },
+  "main": "./src/index.ts",
+  "files": [
+    "src",
+    "instructions",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --experimental-strip-types --test test/*.test.ts"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.0.0"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "^1.0.0"
+  },
+  "engines": {
+    "node": ">=22.6"
+  }
+}

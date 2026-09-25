@@ -1,0 +1,19 @@
+{
+  "name": "opentype-js",
+  "private": true,
+  "packageManager": "pnpm@10.20.0",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "generate": "pnpm --filter @opentype/sdk generate",
+    "build": "pnpm --filter @opentype/sdk --filter @opentype/mcp build",
+    "typecheck": "pnpm --filter @opentype/sdk --filter @opentype/mcp typecheck",
+    "test": "pnpm --filter @opentype/sdk --filter @opentype/mcp test",
+    "test:plugin": "pnpm --filter @opentype/opencode-plugin test",
+    "test:stdio": "node scripts/mcp-stdio-check.mjs"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.30.1"
+  }
+}

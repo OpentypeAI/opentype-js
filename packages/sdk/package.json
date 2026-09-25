@@ -1,0 +1,123 @@
+{
+  "name": "@opentype/sdk",
+  "version": "0.1.0",
+  "description": "TypeScript client for the OpenType API: calibrated decisions, validated verdicts and model routing with Neon 1.1.",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/OpentypeAI/opentype-js/tree/main/packages/sdk#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OpentypeAI/opentype-js.git",
+    "directory": "packages/sdk"
+  },
+  "bugs": {
+    "url": "https://github.com/OpentypeAI/opentype-js/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./tools": {
+      "import": {
+        "types": "./dist/tools/index.d.ts",
+        "default": "./dist/tools/index.js"
+      },
+      "require": {
+        "types": "./dist/tools/index.d.cts",
+        "default": "./dist/tools/index.cjs"
+      }
+    },
+    "./tools/vercel": {
+      "import": {
+        "types": "./dist/tools/vercel.d.ts",
+        "default": "./dist/tools/vercel.js"
+      },
+      "require": {
+        "types": "./dist/tools/vercel.d.cts",
+        "default": "./dist/tools/vercel.cjs"
+      }
+    },
+    "./tools/openai": {
+      "import": {
+        "types": "./dist/tools/openai.d.ts",
+        "default": "./dist/tools/openai.js"
+      },
+      "require": {
+        "types": "./dist/tools/openai.d.cts",
+        "default": "./dist/tools/openai.cjs"
+      }
+    },
+    "./tools/anthropic": {
+      "import": {
+        "types": "./dist/tools/anthropic.d.ts",
+        "default": "./dist/tools/anthropic.js"
+      },
+      "require": {
+        "types": "./dist/tools/anthropic.d.cts",
+        "default": "./dist/tools/anthropic.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "generate": "openapi-typescript ../../openapi.json --output src/generated/schema.ts",
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "OPENTYPE_E2E=1 vitest run test/e2e.test.ts"
+  },
+  "peerDependencies": {
+    "@anthropic-ai/sdk": ">=0.30",
+    "ai": ">=4",
+    "openai": ">=4",
+    "zod": ">=4.2"
+  },
+  "peerDependenciesMeta": {
+    "@anthropic-ai/sdk": {
+      "optional": true
+    },
+    "ai": {
+      "optional": true
+    },
+    "openai": {
+      "optional": true
+    },
+    "zod": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "0.128.0",
+    "@types/node": "22.20.4",
+    "ai": "7.0.114",
+    "msw": "2.15.0",
+    "openai": "7.23.0",
+    "openapi-typescript": "7.13.0",
+    "tsup": "8.5.1",
+    "typescript": "5.9.3",
+    "vitest": "4.1.11",
+    "zod": "4.6.5"
+  }
+}

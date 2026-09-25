@@ -1,0 +1,397 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`opentype MCP server > lists the six tools (snapshot) 1`] = `
+[
+  {
+    "annotations": {
+      "openWorldHint": true,
+      "readOnlyHint": false,
+      "title": "Decide with probabilities",
+    },
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "draws": {
+          "description": "Independent reads to average (default 1).",
+          "maximum": 8,
+          "minimum": 1,
+          "type": "integer",
+        },
+        "idempotency_key": {
+          "description": "Optional stable key for this logical request. Reuse it when retrying the same call so you are never charged twice.",
+          "maxLength": 200,
+          "type": "string",
+        },
+        "instructions": {
+          "description": "Shared guidance for all questions.",
+          "type": "string",
+        },
+        "max_output_tokens": {
+          "description": "Default 16.",
+          "minimum": 1,
+          "type": "integer",
+        },
+        "model": {
+          "enum": [
+            "neon-1.1",
+            "neon-latest",
+          ],
+          "type": "string",
+        },
+        "questions": {
+          "additionalProperties": {
+            "properties": {
+              "ask_if": {
+                "additionalProperties": {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+                "type": "object",
+              },
+              "criteria": {
+                "description": "noul: {true?, false?} descriptions; choice: {option_name: description|null}; score: ordered list of level names, lowest first.",
+              },
+              "depends_on": {
+                "items": {
+                  "type": "string",
+                },
+                "type": "array",
+              },
+              "instructions": {
+                "description": "The question, e.g. 'Does the customer threaten to leave?'",
+                "type": "string",
+              },
+              "type": {
+                "enum": [
+                  "noul",
+                  "choice",
+                  "score",
+                ],
+                "type": "string",
+              },
+            },
+            "required": [
+              "type",
+              "instructions",
+            ],
+            "type": "object",
+          },
+          "description": "Question id -> question.",
+          "type": "object",
+        },
+        "state": {
+          "description": "The text or record being judged. Keep it under ~15 KB.",
+          "type": "string",
+        },
+      },
+      "required": [
+        "state",
+        "questions",
+      ],
+      "type": "object",
+    },
+    "name": "opentype_decide",
+  },
+  {
+    "annotations": {
+      "openWorldHint": true,
+      "readOnlyHint": false,
+      "title": "Schema-validated verdict",
+    },
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "deadline_ms": {
+          "maximum": 120000,
+          "minimum": 1,
+          "type": "integer",
+        },
+        "idempotency_key": {
+          "description": "Optional stable key for this logical request. Reuse it when retrying the same call so you are never charged twice.",
+          "maxLength": 200,
+          "type": "string",
+        },
+        "max_output_tokens": {
+          "minimum": 1,
+          "type": "integer",
+        },
+        "messages": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "content": {
+                "type": "string",
+              },
+              "role": {
+                "enum": [
+                  "user",
+                  "assistant",
+                ],
+                "type": "string",
+              },
+            },
+            "required": [
+              "role",
+              "content",
+            ],
+            "type": "object",
+          },
+          "minItems": 1,
+          "type": "array",
+        },
+        "schema": {
+          "description": "The JSON Schema the document must satisfy.",
+          "type": "object",
+        },
+        "system": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "messages",
+        "schema",
+        "max_output_tokens",
+      ],
+      "type": "object",
+    },
+    "name": "opentype_verdict",
+  },
+  {
+    "annotations": {
+      "openWorldHint": true,
+      "readOnlyHint": false,
+      "title": "Route to a model",
+    },
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "domain": {
+          "description": "v1 override: route as this domain's default task type. task_type wins.",
+          "enum": [
+            "coding",
+            "math",
+            "reasoning",
+            "knowledge",
+            "agentic",
+            "long_context",
+            "writing",
+            "multilingual",
+            "general",
+          ],
+          "type": "string",
+        },
+        "latency": {
+          "description": "How much latency weighs in balanced. Default standard.",
+          "enum": [
+            "interactive",
+            "standard",
+            "batch",
+          ],
+          "type": "string",
+        },
+        "max_latency_ms": {
+          "description": "Drop models whose estimated time to the full answer exceeds this.",
+          "minimum": 1,
+          "type": "number",
+        },
+        "messages": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "content": {
+                "type": "string",
+              },
+              "role": {
+                "enum": [
+                  "user",
+                  "assistant",
+                ],
+                "type": "string",
+              },
+            },
+            "required": [
+              "role",
+              "content",
+            ],
+            "type": "object",
+          },
+          "minItems": 1,
+          "type": "array",
+        },
+        "models": {
+          "additionalProperties": false,
+          "description": "Filters on the candidate set.",
+          "properties": {
+            "exclude": {
+              "items": {
+                "type": "string",
+              },
+              "type": "array",
+            },
+            "include": {
+              "items": {
+                "type": "string",
+              },
+              "type": "array",
+            },
+            "max_price_per_mtok": {
+              "description": "Blended USD per million tokens.",
+              "type": "number",
+            },
+            "min_context_tokens": {
+              "type": "integer",
+            },
+            "modalities": {
+              "items": {
+                "type": "string",
+              },
+              "type": "array",
+            },
+            "open_weights": {
+              "type": "boolean",
+            },
+            "providers": {
+              "items": {
+                "type": "string",
+              },
+              "type": "array",
+            },
+          },
+          "type": "object",
+        },
+        "policy": {
+          "enum": [
+            "balanced",
+            "cost_efficient",
+            "capability_heavy",
+            "domain_skills",
+          ],
+          "type": "string",
+        },
+        "prompt": {
+          "description": "The task to route.",
+          "maxLength": 32000,
+          "type": "string",
+        },
+        "task_type": {
+          "description": "Skip task-type classification and route as this type, e.g. code_generation. opentype_list_models with task_types:true lists them.",
+          "type": "string",
+        },
+        "weights": {
+          "additionalProperties": false,
+          "description": "balanced only: your own trade-off, normalized to sum to 1.",
+          "properties": {
+            "cost": {
+              "minimum": 0,
+              "type": "number",
+            },
+            "quality": {
+              "minimum": 0,
+              "type": "number",
+            },
+            "speed": {
+              "minimum": 0,
+              "type": "number",
+            },
+          },
+          "type": "object",
+        },
+      },
+      "type": "object",
+    },
+    "name": "opentype_route_model",
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "List models",
+    },
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "domain": {
+          "description": "Only models listing this specialty.",
+          "enum": [
+            "coding",
+            "math",
+            "reasoning",
+            "knowledge",
+            "agentic",
+            "long_context",
+            "writing",
+            "multilingual",
+            "general",
+          ],
+          "type": "string",
+        },
+        "limit": {
+          "maximum": 500,
+          "minimum": 1,
+          "type": "integer",
+        },
+        "open_weights": {
+          "type": "boolean",
+        },
+        "provider": {
+          "type": "string",
+        },
+        "task_types": {
+          "description": "List the router's task types and their benchmark weights instead of models.",
+          "type": "boolean",
+        },
+      },
+      "type": "object",
+    },
+    "name": "opentype_list_models",
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "Get run",
+    },
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "description": "The run id, prefixed run_.",
+          "type": "string",
+        },
+      },
+      "required": [
+        "run_id",
+      ],
+      "type": "object",
+    },
+    "name": "opentype_get_run",
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "Usage",
+    },
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "end_at": {
+          "description": "RFC 3339",
+          "type": "string",
+        },
+        "include_quota": {
+          "type": "boolean",
+        },
+        "start_at": {
+          "description": "RFC 3339, e.g. 2026-09-01T00:00:00Z",
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "name": "opentype_usage",
+  },
+]
+`;

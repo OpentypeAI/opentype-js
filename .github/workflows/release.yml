@@ -1,0 +1,52 @@
+name: Release
+
+# Publishes @opentype/sdk, @opentype/mcp and @opentype/opencode-plugin to npm on a v* tag,
+# with npm trusted publishing (OIDC) and provenance. No npm token is stored anywhere.
+#
+# Inert until the owner sets the repository variable NPM_PUBLISH=true after configuring
+# a trusted publisher for each package on npmjs.com (see README).
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: vars.NPM_PUBLISH == 'true'
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+      - run: npm install -g npm@latest # trusted publishing needs npm >= 11.5.1
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm test
+      - name: Check tag matches package versions
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          for p in sdk mcp opencode-plugin; do
+            v=$(node -p "require('./packages/$p/package.json').version")
+            [ "$v" = "$tag" ] || { echo "packages/$p is $v, tag is $tag"; exit 1; }
+          done
+      # pnpm pack rewrites workspace:^ to the real version; npm publish does the OIDC exchange.
+      - name: Publish
+        run: |
+          mkdir -p .pack
+          for p in sdk mcp opencode-plugin; do
+            (cd packages/$p && pnpm pack --pack-destination ../../.pack)
+          done
+          for t in .pack/opentype-sdk-*.tgz .pack/opentype-mcp-*.tgz .pack/opentype-opencode-plugin-*.tgz; do
+            npm publish "$t" --provenance --access public
+          done

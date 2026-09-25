@@ -1,0 +1,3994 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "OpenType API",
+    "version": "0.1.0",
+    "license": {
+      "name": "Apache-2.0"
+    },
+    "description": "The OpenType HTTP API: decision runs on Neon 1.1, API keys, usage, quota and billing. Every `/v1` route takes `Authorization: Bearer <credential>`, where the credential is an API key (`otsk_` followed by 64 hex characters) or a console session token. Amounts are integers in micro-USD (1,000,000 = 1 US dollar). Errors share one envelope, `{\"error\": {\"code\", \"message\", \"request_id\"}}`. Stripe is named only where it hosts checkout, the billing portal and receipts."
+  },
+  "servers": [
+    {
+      "url": "https://api.opentype.dev",
+      "description": "Production"
+    }
+  ],
+  "paths": {
+    "/healthz": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Liveness",
+        "operationId": "healthz",
+        "responses": {
+          "200": {
+            "description": "The process is up.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/readyz": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Readiness",
+        "operationId": "readyz",
+        "responses": {
+          "200": {
+            "description": "Every required dependency is ready.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "A required dependency is unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing": {
+      "get": {
+        "tags": [
+          "billing"
+        ],
+        "summary": "Get billing",
+        "operationId": "get_billing",
+        "responses": {
+          "200": {
+            "description": "Balance and history.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`missing_credentials` (no bearer credential) or `invalid_credential` (malformed, unknown or revoked)."
+          },
+          "403": {
+            "description": "`scope_denied`: the credential lacks `billing_read`. A session without an organization gets `no_active_organization`."
+          },
+          "503": {
+            "description": "`billing_not_configured`, `database_not_configured` or `database_unavailable`. Also `auth_not_configured` or `trust_keys_unavailable` when credentials cannot be verified."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/billing/auto-recharge": {
+      "put": {
+        "tags": [
+          "billing"
+        ],
+        "summary": "Set auto-recharge",
+        "description": "Stores auto-recharge settings and returns the updated billing state. Requires `billing_write`.\n\nWhen enabled, and a card is saved, the server checks after each run admission and after each `402`: if the available balance is below `threshold_micros`, it charges `amount_micros` to the saved card, at most once per organization per clock hour. The credit lands when the payment succeeds. See [Auto-recharge](/guides/auto-recharge).",
+        "operationId": "set_auto_recharge",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutoRechargeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The updated billing state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_amount`: `amount_micros` outside the checkout bounds, `threshold_micros` above 1,000,000,000, or either number missing while `enabled` is `true`. Malformed JSON gets a plain-text `400`."
+          },
+          "401": {
+            "description": "`missing_credentials` (no bearer credential) or `invalid_credential` (malformed, unknown or revoked)."
+          },
+          "403": {
+            "description": "`scope_denied`: the credential lacks `billing_write`. A session without an organization gets `no_active_organization`."
+          },
+          "413": {
+            "description": "The body is over 1 MiB. Plain-text body."
+          },
+          "503": {
+            "description": "`billing_not_configured`, `database_not_configured` or `database_unavailable`. Also `auth_not_configured` or `trust_keys_unavailable` when credentials cannot be verified."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/billing/checkout": {
+      "post": {
+        "tags": [
+          "billing"
+        ],
+        "summary": "Create a checkout",
+        "description": "Creates a Stripe Checkout page for a credit purchase and returns its URL. Requires `billing_write`.\n\n`amount_micros` is $5 to $1,000 in whole cents. Paying saves the card for auto-recharge, and both success and cancel return to the console's billing page. The credit is added once the payment is confirmed, not by this response. Returns `200`, not `201`.",
+        "operationId": "create_checkout",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckoutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Where to send the user to pay.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_amount`: outside 5,000,000 to 1,000,000,000, or not a whole number of cents. Malformed JSON gets a plain-text `400`."
+          },
+          "401": {
+            "description": "`missing_credentials` (no bearer credential) or `invalid_credential` (malformed, unknown or revoked)."
+          },
+          "403": {
+            "description": "`scope_denied`: the credential lacks `billing_write`. A session without an organization gets `no_active_organization`."
+          },
+          "413": {
+            "description": "The body is over 1 MiB. Plain-text body."
+          },
+          "503": {
+            "description": "`billing_not_configured`, `stripe_unavailable` (the payment provider did not answer), `database_not_configured` or `database_unavailable`. Also `auth_not_configured` or `trust_keys_unavailable` when credentials cannot be verified."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/billing/portal": {
+      "post": {
+        "tags": [
+          "billing"
+        ],
+        "summary": "Open the billing portal",
+        "operationId": "create_portal",
+        "responses": {
+          "200": {
+            "description": "Where to send the user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortalResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`missing_credentials` (no bearer credential) or `invalid_credential` (malformed, unknown or revoked)."
+          },
+          "403": {
+            "description": "`scope_denied`: the credential lacks `billing_write`. A session without an organization gets `no_active_organization`."
+          },
+          "503": {
+            "description": "`billing_not_configured`, `stripe_unavailable` (the payment provider did not answer), `database_not_configured` or `database_unavailable`. Also `auth_not_configured` or `trust_keys_unavailable` when credentials cannot be verified."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/keys": {
+      "get": {
+        "tags": [
+          "keys"
+        ],
+        "summary": "List API keys",
+        "operationId": "list_keys",
+        "responses": {
+          "200": {
+            "description": "Your organization's keys, without secrets.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`missing_credentials` (no bearer credential) or `invalid_credential` (malformed, unknown or revoked)."
+          },
+          "403": {
+            "description": "`scope_denied`: the credential lacks `keys_read`. A session without an organization gets `no_active_organization`."
+          },
+          "503": {
+            "description": "`database_not_configured` or `database_unavailable`. Also `auth_not_configured` or `trust_keys_unavailable` when credentials cannot be verified."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "keys"
+        ],
+        "summary": "Create an API key",
+        "description": "Creates a key and returns its secret once, in `secret`. Store it now: no other response carries it, and a lost secret is rotated, not recovered.\n\nRequires `keys_write`; a `service_account` principal also needs `members_write`. Every requested scope must be one the caller holds. Scopes are sorted, deduplicated and fixed at creation. Keys do not expire. See [API keys](/console/api-keys).",
+        "operationId": "create_key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The key, with its `secret`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyWithSecretResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`empty_scopes`: `scopes` is empty. Malformed JSON gets a plain-text `400`."
+          },
+          "401": {
+            "description": "`missing_credentials` (no bearer credential) or `invalid_credential` (malformed, unknown or revoked)."
+          },
+          "403": {
+            "description": "`scope_denied` (needs `keys_write`), `scope_exceeds_creator` (a requested scope the caller does not hold) or `principal_is_not_the_caller`."
+          },
+          "503": {
+            "description": "`database_not_configured` or `database_unavailable`. Also `auth_not_configured` or `trust_keys_unavailable` when credentials cannot be verified."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/keys/{key_id}": {
+      "get": {
+        "tags": [
+          "keys"
+        ],
+        "summary": "Retrieve an API key",
+        "operationId": "read_key",
+        "parameters": [
+          {
+            "name": "key_id",
+            "in": "path",
+            "description": "The key's `id`: `key_` followed by 32 hex characters. Never the secret.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The key, without its secret.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`missing_credentials` (no bearer credential) or `invalid_credential` (malformed, unknown or revoked)."
+          },
+          "403": {
+            "description": "`scope_denied`: the credential lacks `keys_read`. A session without an organization gets `no_active_organization`."
+          },
+          "404": {
+            "description": "`key_not_found`: no such key in your organization."
+          },
+          "503": {
+            "description": "`database_not_configured` or `database_unavailable`. Also `auth_not_configured` or `trust_keys_unavailable` when credentials cannot be verified."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "keys"
+        ],
+        "summary": "Revoke an API key",
+        "description": "Revokes a key. It stops authenticating immediately. Requires `keys_write`.\n\nIdempotent: revoking a revoked key returns `200` with the original `revoked_at`. A revoked key is never deleted; it stays in the list with `state: \"revoked\"`.",
+        "operationId": "revoke_key",
+        "parameters": [
+          {
+            "name": "key_id",
+            "in": "path",
+            "description": "The key's `id`: `key_` followed by 32 hex characters. Never the secret.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The key, now `revoked`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`missing_credentials` (no bearer credential) or `invalid_credential` (malformed, unknown or revoked)."
+          },
+          "403": {
+            "description": "`scope_denied`: the credential lacks `keys_write`. A session without an organization gets `no_active_organization`."
+          },
+          "404": {
+            "description": "`key_not_found`: no such key in your organization."
+          },
+          "503": {
+            "description": "`database_not_configured` or `database_unavailable`. Also `auth_not_configured` or `trust_keys_unavailable` when credentials cannot be verified."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/keys/{key_id}/rotate": {
+      "post": {
+        "tags": [
+          "keys"
+        ],
+        "summary": "Rotate an API key",
+        "description": "Issues a new secret for the same key `id`, name and scopes, and returns it once. Requires `keys_write`.\n\nThe old secret stops working immediately; there is no overlap window. A revoked key cannot be rotated. See [Key rotation](/guides/key-rotation).",
+        "operationId": "rotate_key",
+        "parameters": [
+          {
+            "name": "key_id",
+            "in": "path",
+            "description": "The key's `id`: `key_` followed by 32 hex characters. Never the secret.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The key, with its new `secret`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyWithSecretResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`missing_credentials` (no bearer credential) or `invalid_credential` (malformed, unknown or revoked)."
+          },
+          "403": {
+            "description": "`scope_denied`: the credential lacks `keys_write`. A session without an organization gets `no_active_organization`."
+          },
+          "404": {
+            "description": "`key_not_found`: no such key in your organization."
+          },
+          "409": {
+            "description": "`key_revoked`: a revoked key cannot be rotated. Create a new key."
+          },
+          "503": {
+            "description": "`database_not_configured` or `database_unavailable`. Also `auth_not_configured` or `trust_keys_unavailable` when credentials cannot be verified."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/quota": {
+      "get": {
+        "tags": [
+          "usage"
+        ],
+        "summary": "Quota",
+        "description": "Your organization's quota limits for the current period, the UTC calendar month, and what is left. These are the numbers run admission enforces. Requires `usage_read`. Takes no parameters.",
+        "operationId": "organization_quota",
+        "responses": {
+          "200": {
+            "description": "Limits and remaining allowance.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotaResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`missing_credentials` (no bearer credential) or `invalid_credential` (malformed, unknown or revoked)."
+          },
+          "403": {
+            "description": "`scope_denied`: the credential lacks `usage_read`. A session without an organization gets `no_active_organization`."
+          },
+          "500": {
+            "description": "`internal_error`: an unexpected failure. Report the `request_id`."
+          },
+          "503": {
+            "description": "`database_not_configured` or `database_unavailable`: accounting storage is unavailable. Also `auth_not_configured` or `trust_keys_unavailable` when credentials cannot be verified."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/router/models": {
+      "get": {
+        "tags": [
+          "router"
+        ],
+        "summary": "List router models",
+        "operationId": "list_models",
+        "responses": {
+          "200": {
+            "description": "The catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouterModelsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed, or expired credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential lacks runs_read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The catalog is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "description": "The benchmark catalog the router selects from: prices, speed, context, modalities and benchmark scores per model. Requires `runs_read`."
+      }
+    },
+    "/v1/router/select": {
+      "post": {
+        "tags": [
+          "router"
+        ],
+        "summary": "Select a model",
+        "description": "Classifies a task with Neon 1.1 and selects a model from the benchmark catalog. Requires `runs_write`.\n\nBilled as one decision run: the same admission, quota, credit and settlement as `POST /v1/runs` with `\"kind\": \"decision\"`. Send the task as `prompt` or as `messages`, not both. The body may be up to 4 MiB; decisions read up to 262,144 input tokens.\n\n`Idempotency-Key` is optional. Replaying a key returns the stored classification with `replayed: true` and never charges twice.",
+        "operationId": "select",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Optional. Replaying a key returns the stored classification and never charges twice.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RouterSelectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The selected model, the classification and the ranking",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouterSelectResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed body, invalid_policy, weights_require_balanced, unknown_model_id, or no_eligible_model",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed, or expired credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "The organization's credits do not cover the classification",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential lacks runs_write",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The idempotency key was used with a different body, or its classification is not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`body_too_large` (over 4 MiB) or `input_too_large`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The organization's spend or token quota for this period cannot cover the classification.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The classifier or a required dependency is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "`deadline_exceeded`: the classification did not finish within its deadline.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/router/task-types": {
+      "get": {
+        "tags": [
+          "router"
+        ],
+        "summary": "List task types",
+        "operationId": "list_task_types",
+        "responses": {
+          "200": {
+            "description": "The task taxonomy and its benchmark vectors",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouterTaskTypesResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed, or expired credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential lacks runs_read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The catalog is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "description": "The task types the router classifies into, their families, and the benchmarks each one is scored on. Requires `runs_read`."
+      }
+    },
+    "/v1/runs": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "List runs",
+        "description": "Lists your organization's runs, newest first. Requires `runs_read`.\n\nRows are stored runs: each carries `replayed: true` and no `verdict`, `decision`, `usage` or cost. Retrieve a run for its answer. Paging is by `limit` and `offset`; there is no cursor. See [Pagination](/guides/pagination).",
+        "operationId": "list_runs",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "offset",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of runs. `limit` and `offset` echo the values applied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_body`: `limit` or `offset` is not a whole number, or another query parameter was sent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`missing_credentials` (no bearer credential) or `invalid_credential` (malformed, unknown or revoked).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`scope_denied`: the credential lacks `runs_read`. A session without an organization gets `no_active_organization`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Your organization is sending too many requests at once. Retry with backoff.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: an unexpected failure. Report the `request_id`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_unavailable` or `not_configured`. Also `auth_not_configured` or `trust_keys_unavailable` when credentials cannot be verified.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Create a run",
+        "description": "Submits a run and returns its answer. The call is synchronous: it returns once the run has settled. Requires `runs_write`.\n\nNeon 1.1 serves decision runs (`\"kind\": \"decision\"`), with up to 262,144 input tokens. A verdict run currently answers `503 no_route_available`.\n\n`Idempotency-Key` is required. Replaying a key with the same body returns the stored run with `replayed: true` and never charges again: `200` when the stored run is terminal (a failed run replays as `200` with `state: \"failed\"`), `202` when it is still `pending`. The same key with a different body is `409 idempotency_conflict`. Keys are scoped to your organization and never expire. After a `5xx` or `504`, retry with a new key.\n\nWhile it runs, a run holds its whole spend ceiling (at most 20,000 micro-USD) against your credit and quota; settlement charges the actual cost. See [Errors](/reference/errors) for every refusal.\n\nThe response carries a `Server-Timing` header with the time spent per phase, in milliseconds: `admit;dur=…, upstream;dur=…, gateway;dur=…, total;dur=…`. `upstream` is the model call; `gateway` is everything else.",
+        "operationId": "create_run",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "1 to 255 bytes of visible ASCII text, unique per logical request. Reuse it only to retry the same body.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The settled run: a fresh run, or the replay of a terminal run (`replayed: true`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunResponse"
+                }
+              }
+            },
+            "headers": {
+              "Server-Timing": {
+                "description": "Time per phase in milliseconds: `admit;dur=…, upstream;dur=…, gateway;dur=…, total;dur=…`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The replay of a run that is still `pending`. Send the request again with a new `Idempotency-Key`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunResponse"
+                }
+              }
+            },
+            "headers": {
+              "Server-Timing": {
+                "description": "Time per phase in milliseconds: `admit;dur=…, upstream;dur=…, gateway;dur=…, total;dur=…`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_body`, `idempotency_key_required`, `invalid_idempotency_key`, `invalid_verdict_schema`, `invalid_decision_questions` or `unknown_model`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`missing_credentials` (no bearer credential) or `invalid_credential` (malformed, unknown or revoked).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "`insufficient_credits`: your available credit does not cover the run's hold. Buy credit or enable auto-recharge; the same key is reusable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`scope_denied`: the credential lacks `runs_write`. A session without an organization gets `no_active_organization`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`idempotency_conflict`: this key was already used with a different body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`body_too_large` (over 4 MiB) or `input_too_large` (the input estimate is over 262,144 tokens for a decision run, or over 64,000 tokens for a verdict run).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`organization_spend_quota_exhausted` or `organization_token_quota_exhausted`: the quota for this period cannot cover the run. The same key is reusable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: an unexpected failure. Report the `request_id`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The run could not be served: `no_route_available`, `decision_unavailable`, `budget_exhausted`, `verdict_schema_violation` (with `violations`), `catalog_unavailable`, `not_configured`, `database_unavailable`, `provider_unauthorized`, `provider_rate_limited`, `provider_rejected_request`, `provider_unavailable` or `provider_malformed_response`. Also `auth_not_configured` or `trust_keys_unavailable` when credentials cannot be verified.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "`deadline_exceeded`: the run's deadline passed before it finished.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/runs/{run_id}": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Retrieve a run",
+        "description": "Reads one run from stored state. Requires `runs_read`. Never calls the model, so reading a run is free.\n\nA completed run carries its `verdict` or `decision`, plus `usage` and `cost_micros`. Stored reads omit `cost_basis` and `schema_enforcement`, and a stored decision omits `model`, `stages` and the thought fields. A run that is not completed returns the run without an answer.",
+        "operationId": "get_run",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "`run_` followed by 32 hex characters, as the API returns it. The hyphenated form the usage routes return is also accepted.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The run as stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_run_id`: not `run_` followed by a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`missing_credentials` (no bearer credential) or `invalid_credential` (malformed, unknown or revoked).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`scope_denied`: the credential lacks `runs_read`. A session without an organization gets `no_active_organization`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`run_not_found`: no run with this id in your organization.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Your organization is sending too many requests at once. Retry with backoff.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: an unexpected failure. Report the `request_id`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_unavailable` or `not_configured`. Also `auth_not_configured` or `trust_keys_unavailable` when credentials cannot be verified.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/runs/{run_id}/stream": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Stream a run",
+        "description": "Returns the run's stored state as server-sent events, then closes. Requires `runs_read`. Never calls the model, so it cannot charge.\n\nThe body is one snapshot: a `state` event (`{run_id, state}`), then, only when the run is `completed` or `failed`, a `terminal` event with `run_id`, `state`, `input_digest` and `output_digest` (possibly `null`). A completed run's `terminal` event adds `kind` and the whole `verdict` or `decision`. There are no partial-answer events, no `id:` or `retry:` fields, and `Last-Event-ID` is not read. The stream does not wait for a `pending` run: request it again, or poll `GET /v1/runs/{run_id}`. Errors before the stream starts are JSON. See [Streaming](/guides/streaming).",
+        "operationId": "stream_run",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "`run_` followed by 32 hex characters, as the API returns it. The hyphenated form the usage routes return is also accepted.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "`text/event-stream`, sent with `cache-control: no-cache, no-store`. Each frame is `event: <name>` and one `data:` line of JSON.",
+            "content": {
+              "text/event-stream": {}
+            }
+          },
+          "400": {
+            "description": "`invalid_run_id`: not `run_` followed by a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`missing_credentials` (no bearer credential) or `invalid_credential` (malformed, unknown or revoked).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`scope_denied`: the credential lacks `runs_read`. A session without an organization gets `no_active_organization`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`run_not_found`: no run with this id in your organization.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Your organization is sending too many requests at once. Retry with backoff.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error`: an unexpected failure. Report the `request_id`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`database_unavailable` or `not_configured`. Also `auth_not_configured` or `trust_keys_unavailable` when credentials cannot be verified.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/usage": {
+      "get": {
+        "tags": [
+          "usage"
+        ],
+        "summary": "Usage rollup",
+        "description": "Run counts, tokens and spend for your organization over a window. Requires `usage_read`.\n\nThe window is half-open, `[start_at, end_at)`, and counts runs created inside it. Omit both bounds for the current UTC calendar month.",
+        "operationId": "organization_usage",
+        "parameters": [
+          {
+            "name": "start_at",
+            "in": "query",
+            "description": "Window start, exactly `YYYY-MM-DDTHH:MM:SSZ` (UTC), inclusive. Send it with `end_at`; omit both for the current UTC calendar month.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "end_at",
+            "in": "query",
+            "description": "Window end, exactly `YYYY-MM-DDTHH:MM:SSZ` (UTC), exclusive. Send it with `start_at`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Usage for the window.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationUsageResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_parameter`: a malformed window, `start_at` not before `end_at`, or one bound without the other. An unknown query parameter gets a plain-text `400`."
+          },
+          "401": {
+            "description": "`missing_credentials` (no bearer credential) or `invalid_credential` (malformed, unknown or revoked)."
+          },
+          "403": {
+            "description": "`scope_denied`: the credential lacks `usage_read`. A session without an organization gets `no_active_organization`."
+          },
+          "500": {
+            "description": "`internal_error`: an unexpected failure. Report the `request_id`."
+          },
+          "503": {
+            "description": "`database_not_configured` or `database_unavailable`: accounting storage is unavailable. Also `auth_not_configured` or `trust_keys_unavailable` when credentials cannot be verified."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/usage/daily": {
+      "get": {
+        "tags": [
+          "usage"
+        ],
+        "summary": "Daily usage",
+        "description": "One row per UTC day: runs created that day, their tokens and their spend. Requires `usage_read`.\n\nRows run from the start date through the day of the last instant before `end_at`, oldest first. Days without activity are present at zero. The window spans at most 92 days; omit both bounds for the current UTC calendar month.",
+        "operationId": "daily_usage",
+        "parameters": [
+          {
+            "name": "start_at",
+            "in": "query",
+            "description": "Window start, exactly `YYYY-MM-DDTHH:MM:SSZ` (UTC), inclusive. Send it with `end_at`; omit both for the current UTC calendar month.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "end_at",
+            "in": "query",
+            "description": "Window end, exactly `YYYY-MM-DDTHH:MM:SSZ` (UTC), exclusive. Send it with `start_at`. At most 92 days after `start_at`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One row per UTC day.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DailyUsageResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_parameter`: a malformed window, `start_at` not before `end_at`, one bound without the other, or a window over 92 days. An unknown query parameter gets a plain-text `400`."
+          },
+          "401": {
+            "description": "`missing_credentials` (no bearer credential) or `invalid_credential` (malformed, unknown or revoked)."
+          },
+          "403": {
+            "description": "`scope_denied`: the credential lacks `usage_read`. A session without an organization gets `no_active_organization`."
+          },
+          "500": {
+            "description": "`internal_error`: an unexpected failure. Report the `request_id`."
+          },
+          "503": {
+            "description": "`database_not_configured` or `database_unavailable`: accounting storage is unavailable. Also `auth_not_configured` or `trust_keys_unavailable` when credentials cannot be verified."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/usage/ledger": {
+      "get": {
+        "tags": [
+          "usage"
+        ],
+        "summary": "Usage ledger",
+        "description": "The spend and token ledger: one entry per model attempt, newest first. Requires `usage_read`.\n\nThe window filters on when each attempt was recorded. There is no offset: narrow the window to read further back.",
+        "operationId": "usage_ledger",
+        "parameters": [
+          {
+            "name": "start_at",
+            "in": "query",
+            "description": "Window start, exactly `YYYY-MM-DDTHH:MM:SSZ` (UTC), inclusive. Send it with `end_at`; omit both for the current UTC calendar month.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "end_at",
+            "in": "query",
+            "description": "Window end, exactly `YYYY-MM-DDTHH:MM:SSZ` (UTC), exclusive. Send it with `start_at`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Entries to return. Defaults to 50; values above 200 are clamped to 200. `0` is refused.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ledger entries for the window.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LedgerResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_parameter`: a malformed window, one bound without the other, or `limit=0`. An unknown query parameter gets a plain-text `400`."
+          },
+          "401": {
+            "description": "`missing_credentials` (no bearer credential) or `invalid_credential` (malformed, unknown or revoked)."
+          },
+          "403": {
+            "description": "`scope_denied`: the credential lacks `usage_read`. A session without an organization gets `no_active_organization`."
+          },
+          "500": {
+            "description": "`internal_error`: an unexpected failure. Report the `request_id`."
+          },
+          "503": {
+            "description": "`database_not_configured` or `database_unavailable`: accounting storage is unavailable. Also `auth_not_configured` or `trust_keys_unavailable` when credentials cannot be verified."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/usage/runs/{run_id}": {
+      "get": {
+        "tags": [
+          "usage"
+        ],
+        "summary": "Run usage",
+        "description": "One run's tokens, spend and spend ceiling, with the attempts that produced them. Requires `usage_read`.\n\nAccepts `run_` followed by 32 hex characters or by a hyphenated UUID, in either case, and returns the hyphenated form.",
+        "operationId": "run_usage",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "`run_` followed by 32 hex characters or by a hyphenated UUID.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Usage for the run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunUsageResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_parameter`: the id does not start with `run_`, or does not carry a UUID."
+          },
+          "401": {
+            "description": "`missing_credentials` (no bearer credential) or `invalid_credential` (malformed, unknown or revoked)."
+          },
+          "403": {
+            "description": "`scope_denied`: the credential lacks `usage_read`. A session without an organization gets `no_active_organization`."
+          },
+          "404": {
+            "description": "`run_not_found`: no run with this id in your organization."
+          },
+          "500": {
+            "description": "`internal_error`: an unexpected failure. Report the `request_id`."
+          },
+          "503": {
+            "description": "`database_not_configured` or `database_unavailable`: accounting storage is unavailable. Also `auth_not_configured` or `trust_keys_unavailable` when credentials cannot be verified."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AutoRechargeRequest": {
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "threshold_micros": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Required when `enabled` is `true`. At most 1,000,000,000.",
+            "minimum": 0
+          },
+          "amount_micros": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Required when `enabled` is `true`. 5,000,000 to 1,000,000,000, in whole cents.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "AutoRechargeSettings": {
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "threshold_micros": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "amount_micros": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "BillingResponse": {
+        "type": "object",
+        "required": [
+          "organization_id",
+          "balance_micros",
+          "currency",
+          "auto_recharge",
+          "has_payment_method",
+          "transactions"
+        ],
+        "properties": {
+          "organization_id": {
+            "type": "string"
+          },
+          "balance_micros": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Signed. Credits, minus settled spend, minus what unsettled runs hold."
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "auto_recharge": {
+            "$ref": "#/components/schemas/AutoRechargeSettings"
+          },
+          "has_payment_method": {
+            "type": "boolean"
+          },
+          "transactions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BillingTransaction"
+            },
+            "description": "Newest first, at most 50."
+          }
+        }
+      },
+      "BillingTransaction": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "amount_micros",
+          "description",
+          "created_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/BillingTransactionKind"
+          },
+          "amount_micros": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Signed: positive adds credit, negative spends it."
+          },
+          "description": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          }
+        }
+      },
+      "BillingTransactionKind": {
+        "type": "string",
+        "enum": [
+          "purchase",
+          "grant",
+          "usage",
+          "refund",
+          "adjustment"
+        ]
+      },
+      "CapabilityHint": {
+        "type": "string",
+        "description": "A routing capability. A hint can only narrow the routes considered.",
+        "enum": [
+          "chat",
+          "reasoning",
+          "tools",
+          "vision",
+          "streaming",
+          "embedding",
+          "structured_read"
+        ]
+      },
+      "CheckoutRequest": {
+        "type": "object",
+        "required": [
+          "amount_micros"
+        ],
+        "properties": {
+          "amount_micros": {
+            "type": "integer",
+            "format": "int64",
+            "description": "5,000,000 to 1,000,000,000 ($5 to $1,000), a multiple of 10,000 (whole cents).",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "CheckoutResponse": {
+        "type": "object",
+        "required": [
+          "checkout_url"
+        ],
+        "properties": {
+          "checkout_url": {
+            "type": "string"
+          }
+        }
+      },
+      "CostBasis": {
+        "type": "string",
+        "description": "`provider_reported`: the usage the model reported. `estimated`: the pre-call estimate at list prices.",
+        "enum": [
+          "provider_reported",
+          "estimated"
+        ]
+      },
+      "CreateKeyRequest": {
+        "type": "object",
+        "required": [
+          "name",
+          "scopes"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "A label shown in the console. Not unique."
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            },
+            "description": "At least one scope, each held by the caller."
+          },
+          "principal": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/KeyPrincipal",
+                "description": "Which identity the key acts as. Omitted means the calling user, which is\nthe console's default for a personal key."
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateRunRequest": {
+        "type": "object",
+        "description": "A run. `kind` selects a decision (`state` plus `questions`) or a verdict (`messages` plus `schema`), and defaults to `verdict`. `max_output_tokens` is required on every run. Unknown fields are refused, and a field that belongs to the other kind is `400 invalid_body`.",
+        "required": [
+          "max_output_tokens"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/RunKind",
+            "description": "`decision` or `verdict`. Defaults to `verdict`, so send `decision` explicitly for a decision run."
+          },
+          "system": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunMessage"
+            },
+            "description": "Verdict runs only, and required for them. At least one prompt turn."
+          },
+          "schema": {
+            "description": "Verdict runs only, and required for them. The JSON Schema the verdict must satisfy: an object of at most 32 KiB, nesting depth 12, 64 subschemas and 512 properties, `pattern` values of at most 256 characters, and only local `#` references. Out of bounds is `400 invalid_verdict_schema`."
+          },
+          "state": {
+            "description": "Decision runs only, and required for them. What is being decided about: any JSON value. A string is sent as-is; anything else as its JSON text."
+          },
+          "instructions": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Decision runs only. Context that applies to every question."
+          },
+          "questions": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Decision runs only, and required for them. 1 to 64 questions keyed by your own ids. An id must be non-empty and must not contain `:` or a newline. Out of bounds is `400 invalid_decision_questions`.",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DecisionQuestionRequest"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "draws": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Decision runs only. Independent reads to average, 1 to 8. Defaults to 1.",
+            "minimum": 0
+          },
+          "think_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Decision runs only. Tokens the model may think before answering, 0 to 4096. Defaults to 0. The thought text is never returned.",
+            "minimum": 0
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Decision runs only. `neon-1.1`, or `neon-latest`, which resolves to `neon-1.1`. Any other value is `400 unknown_model`.",
+            "example": "neon-1.1"
+          },
+          "capability_hint": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CapabilityHint"
+            },
+            "description": "Optional routing hints. At most 7, no duplicates. Hints can only narrow routing. Hint errors are reported as `invalid_verdict_schema` on either kind."
+          },
+          "max_output_tokens": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Required. Output tokens the run may generate, greater than 0. Counts toward the token quota estimate.",
+            "minimum": 0
+          },
+          "deadline_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Time budget in milliseconds. A verdict run defaults to 30,000 and is clamped to 1 to 120,000. A decision run defaults to 30,000 plus 120,000 per 262,144 input tokens and is clamped to 1 to 150,000. Past it the run is `504 deadline_exceeded`.",
+            "minimum": 0
+          },
+          "question_order": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Decision runs only. Your question order; it must name exactly the keys of `questions`. Defaults to sorted key order."
+          }
+        },
+        "additionalProperties": false
+      },
+      "Currency": {
+        "type": "string",
+        "enum": [
+          "usd"
+        ]
+      },
+      "DailyUsageBody": {
+        "type": "object",
+        "description": "One day of `GET /v1/usage/daily`.",
+        "required": [
+          "date",
+          "runs",
+          "input_tokens",
+          "output_tokens",
+          "spend_micros"
+        ],
+        "properties": {
+          "date": {
+            "type": "string",
+            "description": "`YYYY-MM-DD`, UTC."
+          },
+          "runs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "input_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "output_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "spend_micros": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "DailyUsageResponse": {
+        "type": "object",
+        "description": "`GET /v1/usage/daily`.",
+        "required": [
+          "organization_id",
+          "window",
+          "days"
+        ],
+        "properties": {
+          "organization_id": {
+            "type": "string"
+          },
+          "window": {
+            "$ref": "#/components/schemas/UsageWindowBody"
+          },
+          "days": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DailyUsageBody"
+            },
+            "description": "One row per UTC day, oldest first. Days without activity are present at zero."
+          }
+        }
+      },
+      "DecisionQuestionRequest": {
+        "oneOf": [
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SharedQuestionFields"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "instructions"
+                ],
+                "properties": {
+                  "instructions": {
+                    "type": "string"
+                  },
+                  "criteria": {
+                    "oneOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "$ref": "#/components/schemas/NoulCriteria",
+                        "description": "Optional descriptions of what each side means."
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "description": "A yes/no question. The answer is P(yes).",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "noul"
+                    ]
+                  }
+                }
+              }
+            ],
+            "description": "A yes/no question. Its answer names are `yes` and `no`; the answer's `probability` is P(yes)."
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SharedQuestionFields"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "instructions",
+                  "criteria"
+                ],
+                "properties": {
+                  "instructions": {
+                    "type": "string"
+                  },
+                  "criteria": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "propertyNames": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "description": "A closed option set: option name to an optional description. The name\nis what an answer and an `ask_if` compare against.",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "choice"
+                    ]
+                  }
+                }
+              }
+            ],
+            "description": "A closed option set. The option names are the answer names."
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SharedQuestionFields"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "instructions",
+                  "criteria"
+                ],
+                "properties": {
+                  "instructions": {
+                    "type": "string"
+                  },
+                  "criteria": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "description": "An ordered set of levels. The order is the level order, and the index\nis the meaningful key of the answer.",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "score"
+                    ]
+                  }
+                }
+              }
+            ],
+            "description": "Ordered levels. Answers are keyed by 0-based level index."
+          }
+        ],
+        "description": "One question, selected by `type`: `noul` (yes or no), `choice` (a closed option set) or `score` (ordered levels). Each needs 2 to 20 alternatives with unique names; `noul` always has 2. Unknown keys are refused."
+      },
+      "DecisionReadResponse": {
+        "type": "string",
+        "description": "What constrained a decision's answers: `slot_constrained` when the model could only answer inside the closed answer set, `reconstructed` when the answers were read back from its output.",
+        "enum": [
+          "slot_constrained",
+          "reconstructed"
+        ]
+      },
+      "DecisionResponse": {
+        "type": "object",
+        "description": "A decision's answers.",
+        "required": [
+          "answers",
+          "draws",
+          "read"
+        ],
+        "properties": {
+          "answers": {
+            "description": "One answer per question, keyed by your question ids. Shapes by `type`: `noul` has `probability`, which is P(yes); `choice` has `choice`, `probabilities` keyed by option name, and `confidence`; `score` has `score` (the expected 0-based level index), `legend`, `probabilities` keyed by index, and `confidence`; `skipped` has `because` (`question`, `answered` when known, `required`) when an `ask_if` failed. Any answer may carry `label_mass` and `answered_within_labels`. Every probability and confidence is between 0 and 1."
+          },
+          "draws": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Reads averaged.",
+            "minimum": 0
+          },
+          "read": {
+            "$ref": "#/components/schemas/DecisionReadResponse",
+            "description": "What constrained the answers. Only `slot_constrained` is produced today."
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Live responses only. The model that served the run: `neon-1.1`.",
+            "example": "neon-1.1"
+          },
+          "stages": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "Live responses only. Question ids per stage, in the order the stages ran."
+          },
+          "thought_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Live responses only, when thought tokens were generated. The thought text is never returned.",
+            "minimum": 0
+          },
+          "thought_closed": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "service"
+        ],
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          }
+        }
+      },
+      "KeyListResponse": {
+        "type": "object",
+        "required": [
+          "keys"
+        ],
+        "properties": {
+          "keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KeyResponse"
+            }
+          }
+        }
+      },
+      "KeyPrincipal": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "A human member. The value is the user identifier.",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "The user's id."
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "user"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A machine identity owned by the organization. At most 64 characters\nof `[A-Za-z0-9_-]`; the service prefixes `svc_` when it is missing.",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "An id you choose for the service account."
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "service_account"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Who a key acts as: a user, or a service account owned by the organization."
+      },
+      "KeyResponse": {
+        "type": "object",
+        "description": "A key without its secret.",
+        "required": [
+          "id",
+          "name",
+          "principal",
+          "scopes",
+          "state",
+          "secret_prefix",
+          "created_by",
+          "created_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "principal": {
+            "$ref": "#/components/schemas/KeyPrincipal"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            }
+          },
+          "state": {
+            "$ref": "#/components/schemas/KeyState"
+          },
+          "secret_prefix": {
+            "type": "string",
+            "description": "The first 13 characters of the secret (`otsk_` plus 8), for display."
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "last_used_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "KeyState": {
+        "type": "string",
+        "description": "A revoked key is kept, never deleted.",
+        "enum": [
+          "active",
+          "revoked"
+        ]
+      },
+      "KeyWithSecretResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/KeyResponse"
+          },
+          {
+            "type": "object",
+            "required": [
+              "secret"
+            ],
+            "properties": {
+              "secret": {
+                "type": "string",
+                "description": "The plaintext secret. Shown once. The service stores only its SHA-256\nand cannot return this value again; a lost secret is rotated, not\nrecovered."
+              }
+            }
+          }
+        ],
+        "description": "A key with its secret. Only create and rotate return this."
+      },
+      "LedgerEntryBody": {
+        "type": "object",
+        "description": "One model attempt.",
+        "required": [
+          "run_id",
+          "retry_ordinal",
+          "provider",
+          "model_id",
+          "status",
+          "tokens",
+          "cost_micros",
+          "created_at"
+        ],
+        "properties": {
+          "run_id": {
+            "type": "string"
+          },
+          "retry_ordinal": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "provider": {
+            "type": "string"
+          },
+          "model_id": {
+            "type": "string"
+          },
+          "provider_request_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/TokenTotalsBody"
+          },
+          "cost_micros": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "created_at": {
+            "type": "string"
+          }
+        }
+      },
+      "LedgerResponse": {
+        "type": "object",
+        "description": "`GET /v1/usage/ledger`.",
+        "required": [
+          "organization_id",
+          "window",
+          "limit",
+          "entries"
+        ],
+        "properties": {
+          "organization_id": {
+            "type": "string"
+          },
+          "window": {
+            "$ref": "#/components/schemas/UsageWindowBody"
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LedgerEntryBody"
+            }
+          }
+        }
+      },
+      "MessageRole": {
+        "type": "string",
+        "enum": [
+          "user",
+          "assistant"
+        ]
+      },
+      "NoulCriteria": {
+        "type": "object",
+        "description": "What each side of a yes/no question means. Both are optional.",
+        "properties": {
+          "true": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "false": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "OrganizationUsageResponse": {
+        "type": "object",
+        "description": "`GET /v1/usage`.",
+        "required": [
+          "organization_id",
+          "window",
+          "runs",
+          "tokens",
+          "spend"
+        ],
+        "properties": {
+          "organization_id": {
+            "type": "string"
+          },
+          "window": {
+            "$ref": "#/components/schemas/UsageWindowBody"
+          },
+          "runs": {
+            "$ref": "#/components/schemas/RunCountsBody"
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/TokenTotalsBody"
+          },
+          "spend": {
+            "$ref": "#/components/schemas/SpendTotalsBody"
+          }
+        }
+      },
+      "PortalResponse": {
+        "type": "object",
+        "required": [
+          "portal_url"
+        ],
+        "properties": {
+          "portal_url": {
+            "type": "string"
+          }
+        }
+      },
+      "QuotaLimitsBody": {
+        "type": "object",
+        "description": "The limits half of `GET /v1/quota`. A null limit is \"no organization-level\nlimit is configured\"; `request_spend_ceiling_micros` is never null.",
+        "required": [
+          "request_spend_ceiling_micros"
+        ],
+        "properties": {
+          "period_spend_limit_micros": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "period_token_limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "request_spend_ceiling_micros": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The per-run spend ceiling, at most 20,000 micro-USD. Each run holds this much until it settles.",
+            "minimum": 0
+          }
+        }
+      },
+      "QuotaResponse": {
+        "type": "object",
+        "description": "`GET /v1/quota`.",
+        "required": [
+          "organization_id",
+          "period",
+          "limits",
+          "consumed_tokens",
+          "consumed_spend"
+        ],
+        "properties": {
+          "organization_id": {
+            "type": "string"
+          },
+          "period": {
+            "$ref": "#/components/schemas/UsageWindowBody"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/QuotaLimitsBody"
+          },
+          "consumed_tokens": {
+            "$ref": "#/components/schemas/TokenTotalsBody"
+          },
+          "consumed_spend": {
+            "$ref": "#/components/schemas/SpendTotalsBody"
+          },
+          "remaining_spend_micros": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The spend limit minus the larger of settled and reserved spend, floored at 0. `null` when there is no spend limit.",
+            "minimum": 0
+          },
+          "remaining_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "RouterBenchmarkContribution": {
+        "type": "object",
+        "description": "One benchmark's part in a candidate's expected quality.",
+        "required": [
+          "benchmark",
+          "name",
+          "norm",
+          "weight",
+          "contribution"
+        ],
+        "properties": {
+          "benchmark": {
+            "type": "string",
+            "example": "swe_bench_verified"
+          },
+          "name": {
+            "type": "string",
+            "example": "SWE-bench Verified"
+          },
+          "value": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The published value, null when imputed."
+          },
+          "rank": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Rank among catalog models with a published value, null when imputed.",
+            "minimum": 0
+          },
+          "norm": {
+            "type": "number",
+            "format": "double",
+            "description": "Normalized value, 0-1."
+          },
+          "weight": {
+            "type": "number",
+            "format": "double",
+            "description": "Weight of the benchmark for this task."
+          },
+          "contribution": {
+            "type": "number",
+            "format": "double",
+            "description": "weight × norm."
+          },
+          "gap_to_best": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Weaknesses only: weight × (this model − the best candidate)."
+          }
+        }
+      },
+      "RouterBenchmarkHighlight": {
+        "type": "object",
+        "description": "A benchmark where a model ranks in the catalog's top three.",
+        "required": [
+          "benchmark",
+          "name",
+          "value",
+          "rank",
+          "of"
+        ],
+        "properties": {
+          "benchmark": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "number",
+            "format": "double"
+          },
+          "rank": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "of": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Models with a published value.",
+            "minimum": 0
+          }
+        }
+      },
+      "RouterCatalogModel": {
+        "type": "object",
+        "description": "One catalog model.",
+        "required": [
+          "id",
+          "name",
+          "provider",
+          "open_weights",
+          "context_tokens",
+          "modalities",
+          "price_input_per_mtok",
+          "price_output_per_mtok",
+          "blended_price_per_mtok",
+          "reasoning_token_factor",
+          "scores",
+          "domains",
+          "highlights",
+          "benchmarks_measured"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "open_weights": {
+            "type": "boolean"
+          },
+          "license": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "released": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "context_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "modalities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "price_input_per_mtok": {
+            "type": "number",
+            "format": "double"
+          },
+          "price_output_per_mtok": {
+            "type": "number",
+            "format": "double"
+          },
+          "blended_price_per_mtok": {
+            "type": "number",
+            "format": "double"
+          },
+          "output_tokens_per_s": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "ttft_ms": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "reasoning_token_factor": {
+            "type": "number",
+            "format": "double",
+            "description": "Output tokens emitted per visible output token, relative to the\ncatalog median; at least 1."
+          },
+          "scores": {
+            "$ref": "#/components/schemas/RouterScores"
+          },
+          "domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Domains where the model is a specialist (top quartile of the catalog)."
+          },
+          "highlights": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouterBenchmarkHighlight"
+            },
+            "description": "Benchmarks where it ranks top three, best rank first, at most eight."
+          },
+          "benchmarks_measured": {
+            "type": "integer",
+            "description": "Benchmarks with a published value for this model.",
+            "minimum": 0
+          }
+        }
+      },
+      "RouterClassification": {
+        "type": "object",
+        "required": [
+          "domain",
+          "difficulty",
+          "task_type",
+          "facets"
+        ],
+        "properties": {
+          "domain": {
+            "$ref": "#/components/schemas/RouterLabel",
+            "description": "v1 vocabulary, derived from the task-type distribution."
+          },
+          "difficulty": {
+            "$ref": "#/components/schemas/RouterLabel",
+            "description": "v1 vocabulary (`easy`, `medium`, `hard`), derived from the level."
+          },
+          "task_type": {
+            "$ref": "#/components/schemas/RouterTaskType"
+          },
+          "facets": {
+            "$ref": "#/components/schemas/RouterFacets"
+          }
+        }
+      },
+      "RouterFacets": {
+        "type": "object",
+        "description": "The facets the ranking conditions on.",
+        "required": [
+          "difficulty_expected",
+          "difficulty",
+          "output_length",
+          "output_tokens_est",
+          "needs_tools",
+          "needs_vision",
+          "safety_sensitive",
+          "language",
+          "input_tokens_est"
+        ],
+        "properties": {
+          "difficulty_expected": {
+            "type": "number",
+            "format": "double",
+            "description": "Expected level on the 0-3 scale (trivial, standard, hard, expert),\nafter the safety floor."
+          },
+          "difficulty": {
+            "$ref": "#/components/schemas/RouterLabel",
+            "description": "`trivial`, `standard`, `hard` or `expert`."
+          },
+          "output_length": {
+            "$ref": "#/components/schemas/RouterLabel",
+            "description": "`short`, `medium`, `long` or `huge`."
+          },
+          "output_tokens_est": {
+            "type": "number",
+            "format": "double",
+            "description": "Expected visible output tokens."
+          },
+          "needs_tools": {
+            "type": "number",
+            "format": "double"
+          },
+          "needs_vision": {
+            "type": "number",
+            "format": "double"
+          },
+          "safety_sensitive": {
+            "type": "number",
+            "format": "double"
+          },
+          "language": {
+            "type": "string",
+            "description": "Language the task is written in: `en`, `fr`, `zh`, `es` or `other`."
+          },
+          "target_language": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Translation target, when the task asks for one."
+          },
+          "input_tokens_est": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "RouterFilterCount": {
+        "type": "object",
+        "description": "How many models one filter removed.",
+        "required": [
+          "filter",
+          "removed"
+        ],
+        "properties": {
+          "filter": {
+            "type": "string"
+          },
+          "removed": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "RouterImputed": {
+        "type": "object",
+        "description": "A benchmark value that was imputed for a candidate.",
+        "required": [
+          "benchmark",
+          "rule"
+        ],
+        "properties": {
+          "benchmark": {
+            "type": "string"
+          },
+          "rule": {
+            "type": "string",
+            "description": "`correlated`, `family` or `index`."
+          },
+          "from": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "RouterLabel": {
+        "type": "object",
+        "description": "One classified label and the distribution it was the argmax of.",
+        "required": [
+          "label",
+          "probabilities"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "probabilities": {
+            "type": "object",
+            "description": "Probability per label. For a caller-fixed label this is that label at\n`1.0`.",
+            "additionalProperties": {
+              "type": "number",
+              "format": "double"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "RouterModelFilters": {
+        "type": "object",
+        "description": "Filters over the catalog. All optional; an empty object keeps every model.",
+        "properties": {
+          "include": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Only these model ids. An id the catalog does not list is `400`\n`unknown_model_id`."
+          },
+          "exclude": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Never these model ids. Same check as `include`."
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Only these providers, e.g. `openai`, case-insensitive."
+          },
+          "open_weights": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "`true`: open-weights models only; `false`: closed only."
+          },
+          "max_price_per_mtok": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Maximum blended price (3:1 input:output), USD per million tokens."
+          },
+          "min_context_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "modalities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Every listed modality must be supported: `text`, `image`, `audio`,\n`video`."
+          }
+        },
+        "additionalProperties": false
+      },
+      "RouterModelRef": {
+        "type": "object",
+        "description": "A model, as a selection names it.",
+        "required": [
+          "id",
+          "name",
+          "provider",
+          "open_weights"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "gpt-6-sol"
+          },
+          "name": {
+            "type": "string",
+            "example": "GPT-6 Sol"
+          },
+          "provider": {
+            "type": "string",
+            "example": "openai"
+          },
+          "open_weights": {
+            "type": "boolean"
+          }
+        }
+      },
+      "RouterModelsResponse": {
+        "type": "object",
+        "required": [
+          "as_of",
+          "benchmarks_as_of",
+          "source",
+          "domains",
+          "task_types",
+          "policies",
+          "models"
+        ],
+        "properties": {
+          "as_of": {
+            "type": "string"
+          },
+          "benchmarks_as_of": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "task_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "policies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouterCatalogModel"
+            }
+          }
+        }
+      },
+      "RouterRankingEntry": {
+        "type": "object",
+        "description": "One ranked candidate.",
+        "required": [
+          "id",
+          "name",
+          "provider",
+          "open_weights",
+          "score",
+          "blended_price_per_mtok",
+          "domain_score",
+          "expected_quality",
+          "uncertainty",
+          "estimated_cost_usd",
+          "estimated_latency_ms",
+          "latency_estimated",
+          "strengths",
+          "weaknesses",
+          "imputed"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "open_weights": {
+            "type": "boolean"
+          },
+          "score": {
+            "type": "number",
+            "format": "double",
+            "description": "The policy's sort key, higher is better. For `cost_efficient` it is\nthe negated estimated cost."
+          },
+          "blended_price_per_mtok": {
+            "type": "number",
+            "format": "double"
+          },
+          "domain_score": {
+            "type": "number",
+            "format": "double",
+            "description": "v1 name for `expected_quality`."
+          },
+          "expected_quality": {
+            "type": "number",
+            "format": "double",
+            "description": "Weighted normalized benchmark quality for this task, 0-1, minus the\nimputation penalty."
+          },
+          "uncertainty": {
+            "type": "number",
+            "format": "double",
+            "description": "Weight on imputed values: 0 when every benchmark was measured."
+          },
+          "estimated_cost_usd": {
+            "type": "number",
+            "format": "double",
+            "description": "USD for this request: input, expected output, reasoning tokens and\nexpected turns."
+          },
+          "estimated_latency_ms": {
+            "type": "number",
+            "format": "double",
+            "description": "Milliseconds to the full answer."
+          },
+          "latency_estimated": {
+            "type": "boolean",
+            "description": "A catalog median stood in for a missing speed or TTFT."
+          },
+          "strengths": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouterBenchmarkContribution"
+            },
+            "description": "Top three benchmarks by contribution."
+          },
+          "weaknesses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouterBenchmarkContribution"
+            },
+            "description": "Up to two benchmarks where it trails the best candidate most."
+          },
+          "imputed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouterImputed"
+            }
+          }
+        }
+      },
+      "RouterScoreBasis": {
+        "type": "string",
+        "description": "Which benchmarks decided. v2 always decides on the task's weighted\nbenchmark vector; `domain` and `intelligence` are the v1 values.",
+        "enum": [
+          "domain",
+          "intelligence",
+          "benchmarks"
+        ]
+      },
+      "RouterScores": {
+        "type": "object",
+        "description": "Benchmark scores, 0-100, null when unknown.",
+        "required": [
+          "intelligence"
+        ],
+        "properties": {
+          "intelligence": {
+            "type": "number",
+            "format": "double"
+          },
+          "coding": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "math": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "reasoning": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "knowledge": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "agentic": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "long_context": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "instruction_following": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "multilingual": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          }
+        }
+      },
+      "RouterSelectRequest": {
+        "type": "object",
+        "description": "A selection request: the task, as `prompt` or as `messages` (exactly one).",
+        "properties": {
+          "prompt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The task. Bodies up to 4 MiB are accepted; only the head and tail of the task are read to classify it."
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunMessage"
+            },
+            "description": "The task as conversation turns, joined into one text as for `prompt`."
+          },
+          "policy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`balanced` (default), `cost_efficient`, `capability_heavy` or\n`domain_skills`. Anything else is `400` `invalid_policy`.",
+            "example": "balanced"
+          },
+          "domain": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "v1 override: route as this domain's default task type (`coding`,\n`math`, `reasoning`, `knowledge`, `agentic`, `long_context`,\n`writing`, `multilingual` or `general`). The task type is then not\nclassified; difficulty and the facets still are."
+          },
+          "task_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Skip task-type classification and route as this task type (see\n`GET /v1/router/task-types`). Wins over `domain`.",
+            "example": "code_generation"
+          },
+          "latency": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`interactive`, `standard` (default) or `batch`: how much estimated\nlatency weighs in `balanced`.",
+            "example": "standard"
+          },
+          "max_latency_ms": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Drop models whose estimated time to the full answer exceeds this, or\nwhose speed is not measured."
+          },
+          "weights": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RouterWeights",
+                "description": "`balanced` only: replaces the quality, cost and latency weights.\nWith any other policy it is `400` `weights_require_balanced`."
+              }
+            ]
+          },
+          "models": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RouterModelFilters"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "RouterSelectResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "run_id",
+          "policy",
+          "model",
+          "classification",
+          "ranking",
+          "score_basis",
+          "filters_applied",
+          "low_confidence",
+          "input_tokens_est",
+          "reason",
+          "decision_model",
+          "catalog_as_of",
+          "benchmarks_as_of",
+          "replayed"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "`rtr_` plus the uuid of the classification run.",
+            "example": "rtr_0f8e3c1a9b2d4e5f8a7b6c5d4e3f2a1b"
+          },
+          "run_id": {
+            "type": "string",
+            "description": "The classification run, readable at `/v1/runs/{run_id}` and in usage."
+          },
+          "policy": {
+            "type": "string"
+          },
+          "model": {
+            "$ref": "#/components/schemas/RouterModelRef"
+          },
+          "classification": {
+            "$ref": "#/components/schemas/RouterClassification"
+          },
+          "ranking": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouterRankingEntry"
+            },
+            "description": "Top candidates, best first, at most ten."
+          },
+          "score_basis": {
+            "$ref": "#/components/schemas/RouterScoreBasis"
+          },
+          "difficulty_floor": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "v1 name for `threshold.tau` (`balanced`, `cost_efficient`)."
+          },
+          "threshold": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RouterThreshold",
+                "description": "The quality bar (`balanced`, `cost_efficient`)."
+              }
+            ]
+          },
+          "filters_applied": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouterFilterCount"
+            },
+            "description": "Filters that removed at least one model, in the order applied."
+          },
+          "low_confidence": {
+            "type": "boolean",
+            "description": "`domain_skills` with a most probable task type under 40%."
+          },
+          "input_tokens_est": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "reason": {
+            "type": "string"
+          },
+          "decision_model": {
+            "type": "string",
+            "example": "neon-1.1"
+          },
+          "catalog_as_of": {
+            "type": "string",
+            "description": "The catalog snapshot date."
+          },
+          "benchmarks_as_of": {
+            "type": "string",
+            "description": "The benchmark snapshot date."
+          },
+          "usage": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UsageResponse"
+              }
+            ]
+          },
+          "cost_micros": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "replayed": {
+            "type": "boolean",
+            "description": "True when an `Idempotency-Key` replayed a stored classification."
+          }
+        }
+      },
+      "RouterTaskType": {
+        "type": "object",
+        "description": "The task-type distribution: the argmax and the five most probable.",
+        "required": [
+          "label",
+          "family",
+          "top",
+          "fixed"
+        ],
+        "properties": {
+          "label": {
+            "type": "string",
+            "example": "code_generation"
+          },
+          "family": {
+            "type": "string"
+          },
+          "top": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouterTaskTypeProbability"
+            },
+            "description": "The five most probable types, most probable first. The ranking mixes\nevery type at 5% or more."
+          },
+          "fixed": {
+            "type": "boolean",
+            "description": "True when the caller fixed the task type (`task_type` or `domain`)."
+          }
+        }
+      },
+      "RouterTaskTypeInfo": {
+        "type": "object",
+        "description": "A task type the router classifies into.",
+        "required": [
+          "id",
+          "family",
+          "domain",
+          "description",
+          "turns",
+          "weights"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "code_generation"
+          },
+          "family": {
+            "type": "string",
+            "example": "coding"
+          },
+          "domain": {
+            "type": "string",
+            "description": "The v1 domain it reports as."
+          },
+          "description": {
+            "type": "string"
+          },
+          "turns": {
+            "type": "number",
+            "format": "double",
+            "description": "Expected model turns; agentic types are multi-turn."
+          },
+          "weights": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouterTaskWeight"
+            },
+            "description": "The benchmark vector, primary first."
+          }
+        }
+      },
+      "RouterTaskTypeProbability": {
+        "type": "object",
+        "description": "One task type and its probability.",
+        "required": [
+          "task_type",
+          "family",
+          "probability"
+        ],
+        "properties": {
+          "task_type": {
+            "type": "string",
+            "example": "code_generation"
+          },
+          "family": {
+            "type": "string",
+            "example": "coding"
+          },
+          "probability": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "RouterTaskTypesResponse": {
+        "type": "object",
+        "required": [
+          "benchmarks_as_of",
+          "families",
+          "task_types"
+        ],
+        "properties": {
+          "benchmarks_as_of": {
+            "type": "string"
+          },
+          "families": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "task_types": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouterTaskTypeInfo"
+            }
+          }
+        }
+      },
+      "RouterTaskWeight": {
+        "type": "object",
+        "description": "One benchmark in a task type's weight vector.",
+        "required": [
+          "benchmark",
+          "name",
+          "weight"
+        ],
+        "properties": {
+          "benchmark": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "weight": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "RouterThreshold": {
+        "type": "object",
+        "description": "The quality bar in force (`balanced`, `cost_efficient`).",
+        "required": [
+          "q_star",
+          "r",
+          "tau"
+        ],
+        "properties": {
+          "q_star": {
+            "type": "number",
+            "format": "double",
+            "description": "Best expected quality among the filtered models."
+          },
+          "r": {
+            "type": "number",
+            "format": "double",
+            "description": "Required share of `q_star` at this difficulty."
+          },
+          "tau": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "RouterWeights": {
+        "type": "object",
+        "description": "The caller's own `balanced` trade-off, normalized to sum to 1.",
+        "properties": {
+          "quality": {
+            "type": "number",
+            "format": "double"
+          },
+          "cost": {
+            "type": "number",
+            "format": "double"
+          },
+          "speed": {
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RunCountsBody": {
+        "type": "object",
+        "required": [
+          "total",
+          "completed",
+          "failed",
+          "in_flight"
+        ],
+        "properties": {
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "completed": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "failed": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "in_flight": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "RunKind": {
+        "type": "string",
+        "description": "`decision`: probabilities over closed answer sets. `verdict`: one JSON document validated against your schema.",
+        "enum": [
+          "verdict",
+          "decision"
+        ]
+      },
+      "RunListResponse": {
+        "type": "object",
+        "description": "A page of runs, newest first.",
+        "required": [
+          "runs",
+          "limit",
+          "offset"
+        ],
+        "properties": {
+          "runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunResponse"
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The limit applied, after clamping to 1 to 100.",
+            "minimum": 0
+          },
+          "offset": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "RunMessage": {
+        "type": "object",
+        "description": "One prompt turn. Unknown keys are refused.",
+        "required": [
+          "role",
+          "content"
+        ],
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/MessageRole"
+          },
+          "content": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RunResponse": {
+        "type": "object",
+        "description": "A run. A completed run carries `verdict` or `decision`, never both. Absent optional fields are omitted, not `null`. Stored reads (replays, retrieve, stream, list rows) omit `cost_basis` and `schema_enforcement`; list rows also omit the answer, `usage` and cost.",
+        "required": [
+          "run_id",
+          "kind",
+          "state",
+          "input_digest",
+          "replayed"
+        ],
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "description": "`run_` followed by 32 hex characters."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RunKind",
+            "description": "Which kind of answer this run produces: look at `verdict` or at `decision`."
+          },
+          "state": {
+            "$ref": "#/components/schemas/RunStateResponse"
+          },
+          "input_digest": {
+            "type": "string",
+            "description": "64-character hex SHA-256 of the normalized input, kind and contract."
+          },
+          "output_digest": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "verdict": {
+            "description": "Completed verdict runs: your JSON document, validated against your schema."
+          },
+          "decision": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DecisionResponse",
+                "description": "The decision's answer set. Present on a completed decision run."
+              }
+            ]
+          },
+          "usage": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UsageResponse"
+              }
+            ]
+          },
+          "cost_micros": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "cost_basis": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CostBasis",
+                "description": "Whether `cost_micros` was reported by the model service or estimated from the price list. Present exactly when `cost_micros` is."
+              }
+            ]
+          },
+          "schema_enforcement": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SchemaEnforcementResponse",
+                "description": "What constrained the verdict. Present on a fresh verdict run; absent on a replay and on a list row."
+              }
+            ]
+          },
+          "replayed": {
+            "type": "boolean",
+            "description": "`true` whenever the body came from storage: every replay, retrieve, stream and list row. A replay is never charged again."
+          }
+        }
+      },
+      "RunStateResponse": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "running",
+          "completed",
+          "failed"
+        ]
+      },
+      "RunUsageResponse": {
+        "type": "object",
+        "description": "`GET /v1/usage/runs/{run_id}`.",
+        "required": [
+          "run_id",
+          "organization_id",
+          "state",
+          "created_at",
+          "tokens",
+          "spend",
+          "ceiling_micros",
+          "attempts"
+        ],
+        "properties": {
+          "run_id": {
+            "type": "string"
+          },
+          "organization_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/TokenTotalsBody"
+          },
+          "spend": {
+            "$ref": "#/components/schemas/SpendTotalsBody"
+          },
+          "ceiling_micros": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "attempts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LedgerEntryBody"
+            }
+          }
+        }
+      },
+      "RunsErrorBody": {
+        "type": "object",
+        "description": "The error envelope, shared by every route. Branch on `error.code`.",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/RunsErrorDetail"
+          }
+        }
+      },
+      "RunsErrorDetail": {
+        "type": "object",
+        "required": [
+          "code",
+          "message",
+          "request_id"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Stable snake_case code. The only field to branch on."
+          },
+          "message": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "violations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Only on `verdict_schema_violation`: up to 10 JSON Pointers into the rejected document."
+          }
+        }
+      },
+      "SchemaEnforcementResponse": {
+        "type": "string",
+        "description": "`unconstrained`: only the server's own validation bound the answer. `requested`: the schema was offered to the model but did not bind it. `forced`: the model was compelled into the schema slot, unchecked upstream. `enforced`: decoding was constrained to the schema. Every returned verdict passed validation, whatever this says.",
+        "enum": [
+          "unconstrained",
+          "requested",
+          "forced",
+          "enforced"
+        ]
+      },
+      "Scope": {
+        "type": "string",
+        "description": "A permission a key or session holds.",
+        "enum": [
+          "runs_read",
+          "runs_write",
+          "keys_read",
+          "keys_write",
+          "members_read",
+          "members_write",
+          "billing_read",
+          "billing_write",
+          "usage_read"
+        ]
+      },
+      "SharedQuestionFields": {
+        "type": "object",
+        "description": "Optional fields every question type accepts.",
+        "properties": {
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ids of other questions in this set that must be answered in an earlier stage. Cycles are refused."
+          },
+          "ask_if": {
+            "type": "object",
+            "description": "Question id to the answer names that make this question worth asking. When the condition fails, the answer is `skipped`.",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "alone": {
+            "type": "boolean",
+            "description": "Read this question on its own rather than jointly with its stage."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SpendTotalsBody": {
+        "type": "object",
+        "required": [
+          "reserved_micros",
+          "settled_micros",
+          "unsettled_micros"
+        ],
+        "properties": {
+          "reserved_micros": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "settled_micros": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "unsettled_micros": {
+            "type": "integer",
+            "format": "int64",
+            "description": "`reserved_micros` minus `settled_micros`, floored at 0.",
+            "minimum": 0
+          }
+        }
+      },
+      "TokenTotalsBody": {
+        "type": "object",
+        "required": [
+          "input_tokens",
+          "output_tokens",
+          "total_tokens"
+        ],
+        "properties": {
+          "input_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "output_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "UsageResponse": {
+        "type": "object",
+        "description": "Tokens the run used.",
+        "required": [
+          "input_tokens",
+          "output_tokens"
+        ],
+        "properties": {
+          "input_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "output_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "UsageWindowBody": {
+        "type": "object",
+        "required": [
+          "start_at",
+          "end_at"
+        ],
+        "properties": {
+          "start_at": {
+            "type": "string"
+          },
+          "end_at": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "bearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "An API key (otsk_ + 64 hex) or a console session token."
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "runs",
+      "description": "Create, list, retrieve and stream runs."
+    },
+    {
+      "name": "keys",
+      "description": "Create, list, rotate and revoke API keys."
+    },
+    {
+      "name": "usage",
+      "description": "Usage rollups, the daily series, the ledger and quota."
+    },
+    {
+      "name": "billing",
+      "description": "Credit balance, checkout, the billing portal and auto-recharge."
+    },
+    {
+      "name": "health",
+      "description": "Public liveness and readiness checks."
+    },
+    {
+      "name": "router",
+      "description": "Model Router: classify a task with Neon 1.1 and pick a model from the benchmark catalog."
+    }
+  ],
+  "security": [
+    {
+      "bearer": []
+    }
+  ]
+}
