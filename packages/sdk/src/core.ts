@@ -221,10 +221,32 @@ export class Core {
 
       if (res.ok) {
         if (req.raw) {
-          // A stream stays bounded by `timeout` and abortable by the caller's signal while it is read.
-          // The timer must not keep the process alive once the caller is done.
-          (timer as { unref?: () => void }).unref?.();
-          return res as T;
+          // A stream stays bounded by `timeout` and abortable by the caller's signal while it is read;
+          // both are released once the body ends, fails or is cancelled.
+          if (!res.body) {
+            done();
+            return res as T;
+          }
+          const reader = res.body.getReader();
+          const body = new ReadableStream<Uint8Array>({
+            async pull(ctl) {
+              try {
+                const { done: end, value } = await reader.read();
+                if (end) {
+                  done();
+                  ctl.close();
+                } else ctl.enqueue(value);
+              } catch (e) {
+                done();
+                ctl.error(e);
+              }
+            },
+            async cancel(reason) {
+              done();
+              await reader.cancel(reason);
+            },
+          });
+          return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers }) as T;
         }
         done();
         let data: T;

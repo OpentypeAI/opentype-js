@@ -93,21 +93,28 @@ test("list_models task_types=true reads the taxonomy", async () => {
   assert.equal(r.title, "1 task types")
 })
 
-test("a paid call without a key sends the same derived key on a retry", async () => {
+test("each new paid call gets its own key; a retry passes the named key back", async () => {
   const keys: string[] = []
+  let fail = true
   const fake = (async (_u: string, init: any) => {
     keys.push(init.headers["Idempotency-Key"])
+    if (fail) {
+      fail = false
+      throw new TypeError("fetch failed")
+    }
     return new Response(JSON.stringify({ id: "run_1" }))
   }) as any
   const tools = createTools({ apiKey: "otsk_test" }, fake)
   const args = { state: "s", questions: { q: { type: "noul", instructions: "yes?" } } }
+  const err: any = await tools.opentype_decide.execute(args as any, {} as any).catch((e) => e)
+  const named = /idempotency_key "([^"]+)"/.exec(err.message)![1]
+  assert.equal(named, keys[0])
+  await tools.opentype_decide.execute({ ...args, idempotency_key: named } as any, {} as any)
   await tools.opentype_decide.execute(args as any, {} as any)
-  await tools.opentype_decide.execute(args as any, {} as any)
-  await tools.opentype_decide.execute({ ...args, state: "other" } as any, {} as any)
-  await tools.opentype_route_model.execute({ prompt: "x" } as any, {} as any)
-  assert.equal(keys[0], keys[1])
-  assert.notEqual(keys[0], keys[2])
-  assert.match(keys[3]!, /^oc-/)
+  await tools.opentype_route_model.execute({ prompt: "x", idempotency_key: "r1" } as any, {} as any)
+  assert.equal(keys[1], keys[0])
+  assert.notEqual(keys[2], keys[0])
+  assert.equal(keys[3], "r1")
 })
 
 test("refuses a plain-http base URL except for localhost", () => {

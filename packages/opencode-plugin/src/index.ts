@@ -27,17 +27,6 @@ function checkBaseUrl(raw: string): string {
   return raw.replace(/\/+$/, "")
 }
 
-/**
- * The same paid request gets the same key, so an agent that retries a tool
- * call after a lost answer replays the stored run instead of paying twice.
- * Pass your own `idempotency_key` to ask for a new run on the same input.
- */
-async function derivedKey(path: string, body: unknown): Promise<string> {
-  const bytes = new TextEncoder().encode(path + "\n" + JSON.stringify(body))
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))
-  return "oc-" + Array.from(digest, (b) => b.toString(16).padStart(2, "0")).join("").slice(0, 48)
-}
-
 const PAID = new Set(["/v1/runs", "/v1/router/select"])
 
 export function createClient(opts: OpenTypeOptions = {}, fetchImpl: Fetch = fetch) {
@@ -53,7 +42,8 @@ export function createClient(opts: OpenTypeOptions = {}, fetchImpl: Fetch = fetc
     }
     const headers: Record<string, string> = { Authorization: `Bearer ${apiKey}`, Accept: "application/json" }
     if (body !== undefined) headers["Content-Type"] = "application/json"
-    const key = method === "POST" && PAID.has(path) ? (idempotencyKey ?? (await derivedKey(path, body))) : undefined
+    // A new key per paid call. A failure names it, and passing it back as `idempotency_key` replays that run instead of paying again.
+    const key = method === "POST" && PAID.has(path) ? (idempotencyKey ?? crypto.randomUUID()) : undefined
     if (key) headers["Idempotency-Key"] = key
     const replay = key ? ` Retry with idempotency_key "${key}" to replay it instead of paying again.` : ""
     let res: Response
@@ -139,7 +129,7 @@ export function createTools(opts: OpenTypeOptions = {}, fetchImpl: Fetch = fetch
         instructions: z.string().optional().describe("Shared context for all questions."),
         draws: z.number().int().min(1).max(8).optional().describe("Noise draws to average, 1-8."),
         model: z.enum(["neon-1.1", "neon-latest"]).optional(),
-        idempotency_key: z.string().optional().describe("Stable key so a retry replays instead of re-billing."),
+        idempotency_key: z.string().min(1).optional().describe("Retrying after an error? Pass the key that error named, so the retry replays the run instead of paying again."),
       },
       async execute({ idempotency_key, ...a }) {
         const run = await call("POST", "/v1/runs", drop({ kind: "decision", max_output_tokens: 16, ...a }), idempotency_key)
@@ -156,7 +146,7 @@ export function createTools(opts: OpenTypeOptions = {}, fetchImpl: Fetch = fetch
         schema: z.record(z.string(), z.any()).describe("JSON Schema the answer must satisfy."),
         max_output_tokens: z.number().int().min(1),
         deadline_ms: z.number().int().min(0).optional(),
-        idempotency_key: z.string().optional(),
+        idempotency_key: z.string().min(1).optional().describe("Retrying after an error? Pass the key that error named."),
       },
       async execute({ idempotency_key, ...a }) {
         const run = await call("POST", "/v1/runs", drop({ kind: "verdict", ...a }), idempotency_key)
@@ -196,11 +186,12 @@ export function createTools(opts: OpenTypeOptions = {}, fetchImpl: Fetch = fetch
             modalities: z.array(z.string()).optional(),
           })
           .optional(),
+        idempotency_key: z.string().min(1).optional().describe("Retrying after an error? Pass the key that error named."),
       },
-      async execute(a) {
+      async execute({ idempotency_key, ...a }) {
         if (!a.prompt === !a.messages) throw new Error("Pass exactly one of `prompt` or `messages`.")
         if (a.weights && (a.policy ?? "balanced") !== "balanced") throw new Error("`weights` requires policy `balanced`.")
-        const r = await call("POST", "/v1/router/select", drop(a))
+        const r = await call("POST", "/v1/router/select", drop(a), idempotency_key)
         return { title: `route: ${r?.model?.id ?? "?"}`, output: `${routeSummary(r)}\n\n${JSON.stringify(r, null, 2)}` }
       },
     }),

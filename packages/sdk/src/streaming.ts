@@ -64,6 +64,8 @@ export async function* parseSSE(body: ReadableStream<Uint8Array>): AsyncGenerato
       }
     }
   } finally {
+    // An early stop (break, return) closes the body instead of leaving the connection open.
+    await reader.cancel().catch(() => {});
     reader.releaseLock();
   }
 }

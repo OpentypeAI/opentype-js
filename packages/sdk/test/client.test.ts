@@ -322,6 +322,27 @@ describe("retries and idempotency", () => {
     await expect(ot.usage.quota()).rejects.toBeInstanceOf(TimeoutError);
   });
 
+  it("releases the stream's timer and abort listener when the body ends or the caller stops early", async () => {
+    const ctl = new AbortController();
+    const added: unknown[] = [];
+    const removed: unknown[] = [];
+    const add = ctl.signal.addEventListener.bind(ctl.signal);
+    const remove = ctl.signal.removeEventListener.bind(ctl.signal);
+    ctl.signal.addEventListener = ((t: string, l: never, o: never) => (added.push(l), add(t, l, o))) as never;
+    ctl.signal.removeEventListener = ((t: string, l: never, o: never) => (removed.push(l), remove(t, l, o))) as never;
+    const clear = vi.spyOn(globalThis, "clearTimeout");
+    const frames = "event: state\ndata: {}\n\nevent: state\ndata: {}\n\n";
+    server.use(http.get(`${BASE}/v1/runs/run_1/stream`, () => new HttpResponse(frames, { headers: { "content-type": "text/event-stream" } })));
+    for await (const _ of client().runs.stream("run_1", { signal: ctl.signal })) void _;
+    expect(removed).toEqual(added);
+    expect(clear).toHaveBeenCalled();
+    clear.mockClear();
+    for await (const _ of client().runs.stream("run_1", { signal: ctl.signal })) break;
+    expect(removed).toEqual(added);
+    expect(clear).toHaveBeenCalled();
+    clear.mockRestore();
+  });
+
   it("an invalid JSON answer to a paid call carries its key", async () => {
     server.use(http.post(`${BASE}/v1/runs`, () => new HttpResponse("<html>", { status: 200 })));
     const e = await client().runs.create({ max_output_tokens: 1 }, { idempotencyKey: "k9" }).catch((x) => x);
