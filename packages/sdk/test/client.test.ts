@@ -19,6 +19,18 @@ import { BASE, client, errBody, run, server, useServer } from "./helpers.js";
 
 useServer();
 
+/** Headers at once, then a body that never ends; aborting the signal errors the body, as fetch does. */
+function stallingFetch(type: string) {
+  return async (_url: string | URL | Request, init?: RequestInit) => {
+    const body = new ReadableStream<Uint8Array>({
+      start(ctl) {
+        init?.signal?.addEventListener("abort", () => ctl.error(init.signal!.reason), { once: true });
+      },
+    });
+    return new Response(body, { status: 200, headers: { "content-type": type } });
+  };
+}
+
 describe("configuration", () => {
   afterEach(() => vi.unstubAllEnvs());
 
@@ -281,6 +293,49 @@ describe("retries and idempotency", () => {
     expect(e).toBeInstanceOf(RunPendingError);
     expect(e.status).toBe(202);
     expect(e.run).toMatchObject({ run_id: "run_1", state: "pending", replayed: true });
+    expect(e.idempotencyKey).toMatch(/.+/);
+  });
+
+  it("retries a body cut off mid-read with the same key and exposes it", async () => {
+    const keys: string[] = [];
+    server.use(
+      http.post(`${BASE}/v1/runs`, ({ request }) => {
+        keys.push(request.headers.get("idempotency-key")!);
+        const body = new ReadableStream({
+          start(ctl) {
+            ctl.enqueue(new TextEncoder().encode('{"run_id":'));
+            ctl.error(new Error("socket closed"));
+          },
+        });
+        return new HttpResponse(body, { status: 200, headers: { "content-type": "application/json" } });
+      }),
+    );
+    const e = await client({ maxRetries: 1, initialRetryDelay: 1 }).runs.create({ max_output_tokens: 1 }).catch((x) => x);
+    expect(e).toBeInstanceOf(APIConnectionError);
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).toBe(keys[0]);
+    expect(e.idempotencyKey).toBe(keys[0]);
+  });
+
+  it("bounds a stalled body by the timeout", async () => {
+    const ot = new OpenType({ apiKey: "otsk_test", baseURL: BASE, timeout: 50, maxRetries: 0, fetch: stallingFetch("application/json") });
+    await expect(ot.usage.quota()).rejects.toBeInstanceOf(TimeoutError);
+  });
+
+  it("an invalid JSON answer to a paid call carries its key", async () => {
+    server.use(http.post(`${BASE}/v1/runs`, () => new HttpResponse("<html>", { status: 200 })));
+    const e = await client().runs.create({ max_output_tokens: 1 }, { idempotencyKey: "k9" }).catch((x) => x);
+    expect(e).toBeInstanceOf(OpenTypeError);
+    expect(e.code).toBe("invalid_response");
+    expect(e.idempotencyKey).toBe("k9");
+  });
+
+  it("keeps a stream abortable after its headers arrive", async () => {
+    const ot = new OpenType({ apiKey: "otsk_test", baseURL: BASE, fetch: stallingFetch("text/event-stream") });
+    const ctl = new AbortController();
+    const next = ot.runs.stream("run_1", { signal: ctl.signal })[Symbol.asyncIterator]().next();
+    setTimeout(() => ctl.abort(new Error("stop")), 30);
+    await expect(next).rejects.toBeDefined();
   });
 
   it("does not retry a plain POST such as key rotation", async () => {

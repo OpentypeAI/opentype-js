@@ -89,7 +89,16 @@ export class Runs {
         throw new TimeoutError({ code: "wait_timeout", message: `Run ${runId} did not finish within the wait timeout` });
       }
       // One attempt per poll: client retries would each get `left` again and overrun the deadline.
-      const run = await this.get(runId, { signal: opts.signal, timeout: left, maxRetries: 0 });
+      let run: WithRequestId<Run>;
+      try {
+        run = await this.get(runId, { signal: opts.signal, timeout: left, maxRetries: 0 });
+      } catch (e) {
+        // The poll ran out of the time left: that is the wait expiring, not a failed request.
+        if (e instanceof TimeoutError && e.code === "timeout") {
+          throw new TimeoutError({ code: "wait_timeout", message: `Run ${runId} did not finish within the wait timeout`, cause: e });
+        }
+        throw e;
+      }
       if (TERMINAL.has(run.state)) return run;
       await sleep(Math.min(opts.interval ?? 1000, Math.max(0, deadline - Date.now())), opts.signal);
     }

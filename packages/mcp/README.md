@@ -118,6 +118,7 @@ Add to `AGENTS.md` or `CLAUDE.md`:
 ## Programmatic use
 
 ```ts
+import { OpenType } from "@opentype/sdk";
 import { createServer } from "@opentype/mcp";
 const server = createServer({ client: new OpenType({ apiKey }) });
 ```

@@ -188,7 +188,13 @@ export class Core {
       const onCallerAbort = () => timeoutCtl.abort();
       o.signal?.addEventListener("abort", onCallerAbort, { once: true });
 
+      const done = () => {
+        clearTimeout(timer);
+        o.signal?.removeEventListener("abort", onCallerAbort);
+      };
+
       let res: Response;
+      let text: string | undefined;
       try {
         // The global is read per call, so a fetch patched after construction (tests, tracing) is honoured.
         res = await (this.customFetch ?? (globalThis.fetch as Fetch))(url, {
@@ -197,33 +203,47 @@ export class Core {
           body: req.body === undefined ? undefined : JSON.stringify(req.body),
           signal: timeoutCtl.signal,
         });
+        // The deadline and the caller's signal cover the body too, not only the headers.
+        if (!(req.raw && res.ok)) text = await res.text();
       } catch (cause) {
-        clearTimeout(timer);
-        o.signal?.removeEventListener("abort", onCallerAbort);
+        done();
         if (o.signal?.aborted) throw o.signal.reason ?? cause;
-        const timedOut = timeoutCtl.signal.aborted;
-        const err = timedOut
+        const err = timeoutCtl.signal.aborted
           ? new TimeoutError({ code: "timeout", message: `Request timed out after ${timeout} ms`, cause })
           : new APIConnectionError({ code: "connection_error", message: `Connection error: ${String((cause as Error)?.message ?? cause)}`, cause });
         err.idempotencyKey = key;
         if (attempt >= maxRetries) throw err;
-        // No response: the run may exist, so the same key is reused.
+        // No usable response (no headers, or a body cut off): the run may exist, so the same key is reused.
         await sleep(this.backoff(attempt, undefined), o.signal);
         continue;
       }
-      if (!req.raw) clearTimeout(timer);
-      o.signal?.removeEventListener("abort", onCallerAbort);
       const requestId = res.headers.get("x-request-id");
 
       if (res.ok) {
         if (req.raw) {
-          clearTimeout(timer);
+          // A stream stays bounded by `timeout` and abortable by the caller's signal while it is read.
+          // The timer must not keep the process alive once the caller is done.
+          (timer as { unref?: () => void }).unref?.();
           return res as T;
         }
-        const text = await res.text();
-        const data = text ? (JSON.parse(text) as T) : (undefined as T);
+        done();
+        let data: T;
+        try {
+          data = text ? (JSON.parse(text) as T) : (undefined as T);
+        } catch (cause) {
+          const err = new OpenTypeError({
+            status: res.status,
+            code: "invalid_response",
+            message: "The response body is not JSON",
+            requestId,
+            headers: res.headers,
+            cause,
+          });
+          err.idempotencyKey = key;
+          throw err;
+        }
         if (res.status === 202 && req.pendingIsError) {
-          throw new RunPendingError({
+          const err = new RunPendingError({
             status: 202,
             code: "run_pending",
             message:
@@ -232,12 +252,14 @@ export class Core {
             headers: res.headers,
             run: attachRequestId(data, requestId),
           });
+          err.idempotencyKey = key;
+          throw err;
         }
         return attachRequestId(data, requestId) as T;
       }
 
-      clearTimeout(timer);
-      const err = errorFromResponse(res.status, res.headers, await res.text());
+      done();
+      const err = errorFromResponse(res.status, res.headers, text ?? "");
       err.idempotencyKey = key;
       if (attempt >= maxRetries || !this.shouldRetryStatus(res.status)) throw err;
       // A paid POST answered: a 5xx may already have been charged, so only a status the caller listed is retried.

@@ -135,6 +135,21 @@ describe("SSE", () => {
     expect(msgs).toEqual([{ event: "state", data: "a\nb" }]);
   });
 
+  it("dispatches an event ended by standalone CRs at once, while the stream stays open", async () => {
+    let push!: (s: string) => void;
+    const body = new ReadableStream<Uint8Array>({
+      start(ctl) {
+        push = (s) => ctl.enqueue(new TextEncoder().encode(s));
+      },
+    });
+    const it = parseSSE(body)[Symbol.asyncIterator]();
+    push("data: x\r\r");
+    await expect(it.next()).resolves.toEqual({ done: false, value: { event: "message", data: "x" } });
+    push("\ndata: y\n\n");
+    await expect(it.next()).resolves.toEqual({ done: false, value: { event: "message", data: "y" } });
+    await it.return?.(undefined);
+  });
+
   it("joins multi-line data and flushes a final frame without a blank line", async () => {
     const msgs = [];
     for await (const m of parseSSE(streamOf(["data: a\ndata: b\n\ndata: tail"]))) msgs.push(m);
@@ -194,6 +209,6 @@ describe("waitFor", () => {
 
   it("bounds each poll by the time left", async () => {
     server.use(http.get(`${BASE}/v1/runs/run_1`, () => new Promise<Response>(() => {})));
-    await expect(client().runs.waitFor("run_1", { timeout: 50 })).rejects.toMatchObject({ code: "timeout" });
+    await expect(client().runs.waitFor("run_1", { timeout: 50 })).rejects.toMatchObject({ code: "wait_timeout" });
   });
 });
