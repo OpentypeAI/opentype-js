@@ -117,7 +117,7 @@
     "openapi-typescript": "7.13.0",
     "tsup": "8.5.1",
     "typescript": "5.9.3",
-    "vitest": "4.1.11",
+    "vitest": "3.2.4",
     "zod": "4.6.5"
   }
 }
